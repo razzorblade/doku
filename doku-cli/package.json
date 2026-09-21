@@ -1,0 +1,33 @@
+{
+  "name": "doku-cli",
+  "version": "0.1.0",
+  "description": "Link private per-project docs from a central storage into projects via junctions",
+  "type": "module",
+  "bin": {
+    "doku": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "fflate": "^0.8.3",
+    "ignore": "^7.0.9",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
