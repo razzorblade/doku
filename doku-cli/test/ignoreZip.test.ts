@@ -118,6 +118,41 @@ describe('ignore + zip', () => {
     ]);
   });
 
+  it('honors .gitignore files inside the docs in zip, the same way git does in sync', () => {
+    const { project, docs } = myProject();
+    fs.writeFileSync(path.join(docs, '.gitignore'), '*.tmp\n');
+    fs.writeFileSync(path.join(docs, 'scratch.tmp'), 'x');
+    const sub = path.join(docs, 'copied-folder');
+    fs.mkdirSync(path.join(sub, 'node_modules'), { recursive: true });
+    fs.mkdirSync(path.join(sub, 'deep'));
+    fs.writeFileSync(path.join(sub, '.gitignore'), 'node_modules/\n*.log\n!keep.log\n');
+    fs.writeFileSync(path.join(sub, 'node_modules', 'a.js'), 'x');
+    fs.writeFileSync(path.join(sub, 'deep', 'x.log'), 'x');
+    fs.writeFileSync(path.join(sub, 'deep', 'keep.log'), 'k');
+    fs.writeFileSync(path.join(sub, 'deep', 'b.tmp'), 'x'); // outer .gitignore reaches down here too
+
+    const expected = [
+      '.doku-meta.json',
+      '.gitignore',
+      'README.md',
+      'copied-folder/.gitignore',
+      'copied-folder/deep/keep.log',
+      'file1.md',
+      'file2.md',
+      'folder/inner.md',
+    ];
+    expect(zipEntries(zipCommand('.', { cwd: project, silent: true }))).toEqual(expected);
+
+    // Sync (git add -A) picks exactly the same files.
+    gitIn(box.storage, 'add', '-A');
+    const committed = gitIn(box.storage, 'diff', '--cached', '--name-only')
+      .split('\n')
+      .filter((f) => f.startsWith('my-project/'))
+      .map((f) => f.slice('my-project/'.length))
+      .sort();
+    expect(['.doku-meta.json', ...committed].sort()).toEqual(expected);
+  });
+
   it('never writes a default zip into the storage', () => {
     myProject();
     const out = zipCommand(undefined, { cwd: path.join(box.storage, 'my-project'), silent: true });

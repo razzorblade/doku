@@ -29,7 +29,12 @@ export function syncStorage(storagePath: string, message?: string): SyncResult {
 
   // .dokuignore may have been edited by hand or pulled from another machine.
   const tracked = applyIgnoresToGit(storagePath);
-  if (tracked.length) log.warn(`${tracked.length} ignored file(s) were synced before being ignored and keep syncing (see \`doku ignore\`).`);
+  if (tracked.length) {
+    log.warn(
+      `${tracked.length} file(s) ignored by .dokuignore or .gitignore were synced before being ignored and keep syncing ` +
+        '(`doku ignore` lists them).',
+    );
+  }
   git(storagePath, ['add', '-A']);
   if (git(storagePath, ['status', '--porcelain']) !== '') {
     const msg = message ?? `doku sync ${os.hostname()} ${new Date().toISOString()}`;

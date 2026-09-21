@@ -208,6 +208,10 @@ a linked project, `doku ignore` fails with "Not in a doku project".
   `storage/.dokuignore` applies to all projects.
 - doku copies the rules into the storage's local git exclude (`.git/info/exclude`) whenever you run
   `ignore`, `sync`, `status` or `zip`.
+- A `.gitignore` anywhere in the docs (for example one that came with a folder you copied into
+  `.doku/`) works too: git applies it when syncing, and `doku zip` leaves out the same files, with the same
+  rules (deeper `.gitignore` files and `!` patterns win). Use `.dokuignore` for your own rules, since
+  `doku ignore` and `doku unignore` only edit that file.
 - Ignoring a file that was **already synced** does not stop git from syncing it. doku warns you and prints
   the `git rm --cached` command. Other machines then delete their copy on their next sync.
 

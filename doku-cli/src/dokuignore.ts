@@ -95,6 +95,33 @@ export function applyIgnoresToGit(storagePath: string): string[] {
   return res.ok && res.stdout ? res.stdout.split('\n') : [];
 }
 
+/**
+ * `.gitignore` files inside the storage (e.g. one that came with a folder copied into
+ * `.doku/`). Git applies them to sync on its own; zips use these to do the same.
+ */
+export interface GitignoreLevel {
+  /** Posix path of the folder holding the .gitignore, relative to the storage root. */
+  base: string;
+  ig: Ignore;
+}
+
+/** The .gitignore rules of `dir`, or null when it has none. */
+export function gitignoreAt(dir: string, base: string): GitignoreLevel | null {
+  const text = readFileOr(path.join(dir, '.gitignore'));
+  return text.trim() ? { base, ig: ignore().add(text) } : null;
+}
+
+/** Git's answer for `rel` given the .gitignore files above it (outermost first): the deepest matching rule wins. */
+export function gitignored(levels: GitignoreLevel[], rel: string, isDir: boolean): boolean {
+  let ignored = false;
+  for (const { base, ig } of levels) {
+    const r = ig.test((base ? rel.slice(base.length + 1) : rel) + (isDir ? '/' : ''));
+    if (r.ignored) ignored = true;
+    else if (r.unignored) ignored = false;
+  }
+  return ignored;
+}
+
 /** Tests a posix path relative to the storage root against the root and project .dokuignore files. */
 export type Matcher = (rel: string, isDir: boolean) => boolean;
 

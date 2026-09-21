@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
-import { createMatcher } from './dokuignore.js';
+import { createMatcher, gitignoreAt, gitignored, type GitignoreLevel } from './dokuignore.js';
 import { DokuError } from './errors.js';
 import { samePath } from './paths.js';
 
@@ -24,25 +24,34 @@ export interface ZipFile {
 }
 
 /**
- * Files of the whole storage, or of one project in it, minus .dokuignore'd files,
- * `.git` folders and links. Entries are relative to the zipped folder.
+ * Files of the whole storage, or of one project in it, minus .dokuignore'd and
+ * .gitignore'd files (as git sees them), `.git` folders and links. Entries are
+ * relative to the zipped folder.
  */
 export function collectFiles(storagePath: string, name?: string): ZipFile[] {
   const matcher = createMatcher(storagePath);
+  const skip = (levels: GitignoreLevel[], rel: string, isDir: boolean) => matcher(rel, isDir) || gitignored(levels, rel, isDir);
   const files: ZipFile[] = [];
-  const walk = (dir: string, rel: string) => {
+  const walk = (dir: string, rel: string, parentLevels: GitignoreLevel[]) => {
+    const own = gitignoreAt(dir, rel);
+    const levels = own ? [...parentLevels, own] : parentLevels;
     for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
       if (d.isSymbolicLink()) continue;
       const childRel = rel ? `${rel}/${d.name}` : d.name;
       const abs = path.join(dir, d.name);
       if (d.isDirectory()) {
-        if (d.name !== '.git' && !matcher(childRel, true)) walk(abs, childRel);
-      } else if (d.isFile() && !matcher(childRel, false)) {
+        if (d.name !== '.git' && !skip(levels, childRel, true)) walk(abs, childRel, levels);
+      } else if (d.isFile() && !skip(levels, childRel, false)) {
         files.push({ abs, entry: name ? childRel.slice(name.length + 1) : childRel });
       }
     }
   };
-  walk(name ? path.join(storagePath, name) : storagePath, name ?? '');
+  if (name) {
+    const root = gitignoreAt(storagePath, '');
+    walk(path.join(storagePath, name), name, root ? [root] : []);
+  } else {
+    walk(storagePath, '', []);
+  }
   return files.sort((a, b) => a.entry.localeCompare(b.entry));
 }
 
