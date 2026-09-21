@@ -87,17 +87,19 @@ program
 
 program
   .command('zip')
-  .description('zip the whole storage, or one project (`doku zip .` in a project writes .doku.zip there)')
-  .argument('[target]', 'linked project path or storage project name (default: whole storage)')
+  .description('zip the current project (into its folder as <project>.doku.zip), another one, or --all for the whole storage')
+  .argument('[target]', 'linked project path or storage project name (default: the project you are in)')
+  .option('-a, --all', 'zip the whole storage without asking')
   .option('-o, --output <file>', 'where to write the zip')
   .option('-s, --silent', `don't open the folder; print only the zip path`)
-  .action(run((target: string | undefined, opts) => void zipCommand(target, opts)));
+  .action(run(async (target: string | undefined, opts) => void (await zipCommand(target, opts))));
 
 program
   .command('load')
   .description('load a zip (from `doku zip`, or any zipped docs folder) into the storage; asks before changing anything')
   .argument('<zipFile>', 'zip file to load')
-  .option('-p, --project <name>', 'storage project to load into (default: the one named in the zip)')
+  .option('-p, --project <name>', 'storage project to load into (default: the one named in the zip); for a whole-storage zip, the one project to load')
+  .option('-a, --all', 'whole-storage zip: load every project without asking which')
   .option('--merge', 'existing project: add new files, keep existing ones that differ')
   .option('--overwrite', 'existing project: add new files, replace differing ones (backed up to ~/.doku/backups first)')
   .option('--link <projectPath>', 'link the project into this folder if it is not linked yet')

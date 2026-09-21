@@ -8,12 +8,12 @@ import { log, pc } from '../log.js';
 import { assertSegment } from '../paths.js';
 import { choose, confirm, type Prompter, stdinPrompter } from '../prompt.js';
 import { type LinkEntry, loadLinks } from '../registry.js';
-import { projectAt } from '../resolve.js';
+import { docsContextOf, projectAt } from '../resolve.js';
 import { readZip, type ZipContents } from '../zip.js';
 import { linkCommand } from './link.js';
 
 export interface LoadOptions {
-  /** Storage project to load into, instead of the one named in the zip. */
+  /** Storage project to load into, instead of the one named in the zip. For a whole-storage zip: the one project to load from it. */
   project?: string;
   /** Existing project: add new files, keep existing ones that differ. */
   merge?: boolean;
@@ -21,6 +21,8 @@ export interface LoadOptions {
   overwrite?: boolean;
   /** Project folder to link a not yet linked project into; false to not offer it. */
   link?: string | false;
+  /** Whole-storage zip: load every project in it without asking which. */
+  all?: boolean;
   /** Create missing projects without asking. */
   yes?: boolean;
   cwd?: string;
@@ -174,7 +176,7 @@ async function pickName(zip: ZipContents, zipPath: string, opts: LoadOptions, cw
     return zip.meta.name;
   }
 
-  const base = path.basename(zipPath).replace(/\.zip$/i, '');
+  const base = path.basename(zipPath).replace(/(\.doku)?\.zip$/i, '');
   const candidates = [zip.topFolder, base.startsWith('.') ? undefined : base, projectAt(cwd)?.name];
   const guess = candidates.find((c) => {
     if (!c) return false;
@@ -325,14 +327,8 @@ async function offerLink(name: string, opts: LoadOptions, cwd: string, p: Prompt
   }
 }
 
-/** A whole-storage zip: every project goes through the same questions; root files are only ever added. */
-async function loadStorageZip(zip: ZipContents, storagePath: string, opts: LoadOptions, p: Prompter) {
-  if (opts.project) {
-    throw new DokuError('This zip holds the whole storage, not one project, so --project does not apply. Run it without --project.');
-  }
-  if (typeof opts.link === 'string') {
-    throw new DokuError('This zip holds the whole storage, so --link does not apply. Link projects afterwards with `doku link`.');
-  }
+/** Split a whole-storage zip into its projects and the files at the storage root. */
+function splitStorageZip(zip: ZipContents) {
   const groups = new Map<string, Map<string, Uint8Array>>();
   const rootFiles = new Map<string, Uint8Array>();
   for (const [rel, data] of zip.files) {
@@ -345,17 +341,70 @@ async function loadStorageZip(zip: ZipContents, storagePath: string, opts: LoadO
     if (!groups.has(top)) groups.set(top, new Map());
     groups.get(top)!.set(rel.slice(slash + 1), data);
   }
-  log.info(`The zip holds the whole storage: ${groups.size} project(s).`);
+  return { groups: new Map([...groups].sort(([a], [b]) => a.localeCompare(b))), rootFiles };
+}
+
+/**
+ * Which projects of a whole-storage zip to load: `--project`, `--all`, or ask
+ * (offering just the project we're in, when the zip has it). Null = cancelled.
+ */
+async function pickStorageProjects(names: string[], opts: LoadOptions, cwd: string, storagePath: string, p: Prompter) {
+  if (opts.project) {
+    if (!names.includes(opts.project)) {
+      throw new DokuError(`The zip has no project "${opts.project}". It holds: ${names.join(', ')}.`);
+    }
+    return [opts.project];
+  }
+  if (opts.all) return names;
+
+  const here = docsContextOf(cwd, storagePath)?.name ?? projectAt(cwd)?.name;
+  if (here && names.includes(here)) {
+    const pick = await choose(
+      p,
+      `You are in project "${here}". What should be loaded?`,
+      [
+        { key: 'p', value: 'project', label: `only "${here}"` },
+        { key: 'a', value: 'all', label: `all ${names.length} project(s)` },
+        { key: 'c', value: 'cancel', label: 'cancel: change nothing' },
+      ],
+      'cancel',
+    );
+    return pick === 'project' ? [here] : pick === 'all' ? names : null;
+  }
+  return (await confirm(p, `Load all ${names.length} project(s) from it?`)) ? names : null;
+}
+
+/**
+ * A whole-storage zip: each chosen project goes through the same questions as a
+ * single-project zip. Root files are only loaded with all projects, and only ever added.
+ */
+async function loadStorageZip(zip: ZipContents, storagePath: string, opts: LoadOptions, cwd: string, p: Prompter) {
+  const { groups, rootFiles } = splitStorageZip(zip);
+  const names = [...groups.keys()];
+  log.info(`The zip holds the whole storage: ${names.length} project(s) (${names.join(', ')}).`);
+  const selected = await pickStorageProjects(names, opts, cwd, storagePath, p);
+  if (!selected) {
+    log.warn('Cancelled; nothing was written. Pick one project with `--project <name>`, or all with `--all`.');
+    return [];
+  }
+  if (typeof opts.link === 'string' && selected.length > 1) {
+    throw new DokuError('--link needs a single project; add `--project <name>`, or link projects afterwards with `doku link`.');
+  }
+  const single = selected.length === 1;
 
   const results: LoadResult[] = [];
-  for (const [name, files] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
-    log.info('');
-    log.info(pc.bold(name));
-    const r = await loadInto(name, files, storagePath, opts, p);
-    if (r) results.push(r);
+  for (const name of selected) {
+    if (!single) {
+      log.info('');
+      log.info(pc.bold(name));
+    }
+    const r = await loadInto(name, groups.get(name)!, storagePath, opts, p);
+    if (!r) continue;
+    if (single) r.linked = await offerLink(name, opts, cwd, p);
+    results.push(r);
   }
 
-  if (rootFiles.size) {
+  if (!single && rootFiles.size) {
     const plan = planFiles(storagePath, rootFiles);
     log.info('');
     if (plan.added.length && (opts.yes || (await confirm(p, `Add ${plan.added.length} file(s) at the storage root?\n${preview(plan.added)}\n`)))) {
@@ -365,7 +414,7 @@ async function loadStorageZip(zip: ZipContents, storagePath: string, opts: LoadO
     if (plan.conflicts.length) log.info(`Kept ${plan.conflicts.length} existing file(s) at the storage root as they are.`);
   }
 
-  const unlinked = results.filter((r) => !loadLinks().some((l) => l.name === r.name));
+  const unlinked = single ? [] : results.filter((r) => !loadLinks().some((l) => l.name === r.name));
   if (unlinked.length) {
     log.info(`Not linked on this machine: ${unlinked.map((r) => r.name).join(', ')}. Link each with \`doku link <projectPath> <name>\`.`);
   }
@@ -393,8 +442,9 @@ export async function loadCommand(zipFile: string, opts: LoadOptions = {}): Prom
   try {
     let results: LoadResult[];
     if (zip.meta?.kind === 'storage') {
-      results = await loadStorageZip(zip, storagePath, opts, p);
+      results = await loadStorageZip(zip, storagePath, opts, cwd, p);
     } else {
+      if (opts.all) throw new DokuError(`This zip holds a single project${zip.meta?.name ? ` ("${zip.meta.name}")` : ''}, so --all does not apply.`);
       const name = await pickName(zip, zipPath, opts, cwd, p);
       if (!name) throw new DokuError('No project name given; nothing was written. Pass one with `--project <name>`.');
       const r = await loadInto(name, zip.files, storagePath, opts, p);

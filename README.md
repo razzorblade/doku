@@ -159,8 +159,8 @@ link on this machine.
 | `doku sync [-m <msg>]` | `git add -A`, commit, `pull --rebase`, `push` in the storage. |
 | `doku ignore [paths...]` | Keep files or folders on this machine only (not synced, not zipped). Without paths, lists the rules. |
 | `doku unignore <paths...>` | Undo `doku ignore`. |
-| `doku zip [target] [-o <file>] [-s]` | Zip the whole storage, or one project (`doku zip .`), then open the folder containing the zip. `-s`/`--silent` only prints the zip path. |
-| `doku load <zip> [--project <name>] [--merge\|--overwrite] [--link <path>\|--no-link] [-y]` | Load a zip into the storage. Asks before creating a project or changing existing files, and never deletes anything. |
+| `doku zip [target] [--all] [-o <file>] [-s]` | Zip the project you are in (or `target`), then open the folder containing the zip. Outside a project it asks before zipping the whole storage; `--all` zips it without asking. `-s`/`--silent` only prints the zip path. |
+| `doku load <zip> [--project <name>\|--all] [--merge\|--overwrite] [--link <path>\|--no-link] [-y]` | Load a zip into the storage. Asks before creating a project or changing existing files, and never deletes anything. |
 | `doku doctor [--fix] [--prune]` | Check links. `--fix` recreates missing or stale ones (e.g. after moving the storage); `--prune` forgets projects that no longer exist. |
 | `doku open [name]` | Open the storage, or one project's docs, in VS Code. |
 | `doku path [name]` | Print the storage path, or one project's docs path. |
@@ -218,11 +218,14 @@ a linked project, `doku ignore` fails with "Not in a doku project".
 ## Zipping: `doku zip`
 
 ```sh
-doku zip                       # the whole storage → ./doku-storage.zip (without .git)
 cd C:/projects/my-project
-doku zip .                     # this project's docs → my-project/.doku.zip
-doku zip my-project -o D:/backup/my-project.zip
+doku zip                       # this project's docs → my-project/my-project.doku.zip (same as `doku zip .`)
+doku zip other-project -o D:/backup/other.zip
+doku zip --all                 # the whole storage → ./doku-storage.zip (without .git)
 ```
+
+Without a target, `doku zip` zips the project you are in: a linked project, any folder inside it or its
+`.doku/`, or a project folder in the storage. Anywhere else it asks before zipping the whole storage.
 
 Ignored files are left out. A project zip written into the project is hidden from the project's git.
 A zip is never written into the storage itself; if you run `doku zip` there, it goes next to the storage.
@@ -232,8 +235,9 @@ Unless you pass `--silent`, the folder containing the zip opens afterwards.
 
 ```sh
 doku load my-project.zip                    # project named in the zip
-doku load .doku.zip --project my-project    # load into this project instead
-doku load doku-storage.zip                  # whole-storage zip: every project in turn
+doku load old.doku.zip --project my-project # load into this project instead
+doku load doku-storage.zip --all            # whole-storage zip: every project in turn
+doku load doku-storage.zip --project notes  # whole-storage zip: only the project "notes"
 ```
 
 `doku zip` puts a small `.doku-meta.json` into every zip that says which project (or the whole storage)
@@ -241,6 +245,10 @@ it holds. `doku load` reads it to pick the storage project; the file itself is n
 without it (made by hand or by the OS), doku suggests a name from the zip's single top folder or the zip's
 file name, and you can type another.
 
+- **Whole-storage zip** (from `doku zip --all`): `--project <name>` loads just that project from it, and
+  `--all` loads every project. Without either, inside a project doku offers to load only that project or
+  all of them; elsewhere it asks before loading all. Files at the storage root are only loaded with all
+  projects, and only added, never replaced.
 - **New project:** doku says the project doesn't exist yet and asks before creating it. Afterwards it
   offers to link it: type a project folder (`.` for the current one), or press Enter to skip and run
   `doku link <projectPath> <name>` later.

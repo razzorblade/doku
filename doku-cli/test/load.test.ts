@@ -38,17 +38,17 @@ describe('doku load', () => {
   const box = useSandbox();
 
   /** A project zipped with `doku zip`, then removed from storage (as on a fresh machine). */
-  function zippedProject(name = 'my-project') {
+  async function zippedProject(name = 'my-project') {
     initCommand({ storage: box.storage });
     const project = box.mkProject(name);
     linkCommand(project, undefined, {});
     fs.writeFileSync(path.join(project, '.doku', 'notes.md'), 'a\nb\n');
-    const zip = zipCommand(name, { cwd: box.root, output: path.join(box.root, `${name}.zip`), silent: true });
+    const zip = (await zipCommand(name, { cwd: box.root, output: path.join(box.root, `${name}.zip`), silent: true }))!;
     return { project, zip, storageDir: path.join(box.storage, name) };
   }
 
-  it('doku zip writes metadata that names the project', () => {
-    const { zip } = zippedProject();
+  it('doku zip writes metadata that names the project', async () => {
+    const { zip } = await zippedProject();
     const contents = readZip(zip);
     expect(contents.meta).toMatchObject({ doku: 1, kind: 'project', name: 'my-project' });
     expect([...contents.files.keys()].sort()).toEqual(['README.md', 'notes.md']);
@@ -94,7 +94,7 @@ describe('doku load', () => {
   });
 
   it('--project with an existing project: append keeps differing files', async () => {
-    const { zip, storageDir } = zippedProject();
+    const { zip, storageDir } = await zippedProject();
     fs.writeFileSync(path.join(storageDir, 'notes.md'), 'changed locally\n');
     fs.rmSync(path.join(storageDir, 'README.md'));
 
@@ -105,7 +105,7 @@ describe('doku load', () => {
   });
 
   it('overwrite backs up replaced files and never deletes extra ones', async () => {
-    const { zip, storageDir } = zippedProject();
+    const { zip, storageDir } = await zippedProject();
     fs.writeFileSync(path.join(storageDir, 'notes.md'), 'changed locally\n');
     fs.writeFileSync(path.join(storageDir, 'only-here.md'), 'keep me');
 
@@ -118,7 +118,7 @@ describe('doku load', () => {
   });
 
   it('cancels by default when the user does not choose', async () => {
-    const { zip, storageDir } = zippedProject();
+    const { zip, storageDir } = await zippedProject();
     fs.writeFileSync(path.join(storageDir, 'notes.md'), 'changed locally\n');
     expect(await loadCommand(zip, { cwd: box.root, prompter: scripted('') })).toEqual([]);
     expect(await loadCommand(zip, { cwd: box.root, prompter: scripted() })).toEqual([]);
@@ -126,7 +126,7 @@ describe('doku load', () => {
   });
 
   it('--project with a missing project asks before creating it', async () => {
-    const { zip } = zippedProject();
+    const { zip } = await zippedProject();
     const p = scripted('y');
     const [r] = await loadCommand(zip, { cwd: box.root, project: 'copy', prompter: p, link: false });
     expect(r.created).toBe(true);
@@ -145,7 +145,7 @@ describe('doku load', () => {
   });
 
   it('skips unsafe entries and does not write through links', async () => {
-    const { zip: _zip, storageDir, project } = zippedProject();
+    const { zip: _zip, storageDir, project } = await zippedProject();
     fs.symlinkSync(project, path.join(storageDir, 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
     const zip = writeZipFile(path.join(box.root, 'evil.zip'), {
       '.doku-meta.json': JSON.stringify({ doku: 1, kind: 'project', name: 'my-project', created: '' }),
@@ -163,17 +163,57 @@ describe('doku load', () => {
     expect(safeEntryPath('a\\b.md')).toBe('a/b.md');
   });
 
-  it('loads a whole-storage zip project by project', async () => {
-    const { storageDir } = zippedProject();
-    const whole = zipCommand(undefined, { cwd: box.root, silent: true });
+  /** Two projects zipped as a whole storage, then removed from storage (as on a fresh machine). */
+  async function wholeStorage() {
+    const { project, storageDir } = await zippedProject();
+    fs.mkdirSync(path.join(box.storage, 'second'));
+    fs.writeFileSync(path.join(box.storage, 'second', 's.md'), 's');
+    const whole = (await zipCommand(undefined, { cwd: box.root, silent: true, all: true }))!;
     fs.renameSync(storageDir, path.join(box.root, 'moved-away'));
+    fs.rmSync(path.join(box.storage, 'second'), { recursive: true });
     fs.rmSync(path.join(box.storage, 'README.md'));
+    return { project, storageDir, whole };
+  }
 
-    const results = await loadCommand(whole, { cwd: box.root, prompter: scripted('y', 'y') });
-    expect(results.map((r) => r.name)).toEqual(['my-project']);
+  it('loads a whole-storage zip: --all loads every project', async () => {
+    const { storageDir, whole } = await wholeStorage();
+    const results = await loadCommand(whole, { cwd: box.root, all: true, prompter: scripted('y', 'y', 'y') });
+    expect(results.map((r) => r.name)).toEqual(['my-project', 'second']);
     expect(read(storageDir, 'notes.md')).toBe('a\nb\n');
+    expect(read(box.storage, 'second', 's.md')).toBe('s');
     expect(fs.existsSync(path.join(box.storage, 'README.md'))).toBe(true);
-    await expect(loadCommand(whole, { cwd: box.root, project: 'x', prompter: scripted() })).rejects.toThrow(/whole storage/);
+  });
+
+  it('whole-storage zip outside a project: asks before loading all', async () => {
+    const { whole } = await wholeStorage();
+    const p = scripted('n');
+    expect(await loadCommand(whole, { cwd: box.root, prompter: p })).toEqual([]);
+    expect(p.questions[0]).toMatch(/Load all 2 project/);
+    expect(fs.existsSync(path.join(box.storage, 'second'))).toBe(false);
+
+    const results = await loadCommand(whole, { cwd: box.root, prompter: scripted('y', 'y', 'y', 'n') });
+    expect(results.map((r) => r.name)).toEqual(['my-project', 'second']);
+    expect(fs.existsSync(path.join(box.storage, 'README.md'))).toBe(false); // root files declined
+  });
+
+  it('whole-storage zip: --project picks one project, or the one you are in', async () => {
+    const { project, whole } = await wholeStorage();
+    const [r] = await loadCommand(whole, { cwd: box.root, project: 'second', prompter: scripted('y', '') });
+    expect(r.name).toBe('second');
+    expect(fs.existsSync(path.join(box.storage, 'my-project'))).toBe(false);
+    await expect(loadCommand(whole, { cwd: box.root, project: 'nope', prompter: scripted() })).rejects.toThrow(/holds: my-project, second/);
+
+    // Inside the linked project: offered only that one (default is cancel).
+    expect(await loadCommand(whole, { cwd: project, prompter: scripted('') })).toEqual([]);
+    const p = scripted('p', 'y');
+    const results = await loadCommand(whole, { cwd: project, prompter: p });
+    expect(p.questions[0]).toMatch(/You are in project "my-project"/);
+    expect(results.map((x) => x.name)).toEqual(['my-project']);
+  });
+
+  it('--all is refused for a single-project zip', async () => {
+    const { zip } = await zippedProject();
+    await expect(loadCommand(zip, { cwd: box.root, all: true, prompter: scripted() })).rejects.toThrow(/single project \("my-project"\)/);
   });
 
   it('describes changes in lines, chars and size', () => {

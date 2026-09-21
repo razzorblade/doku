@@ -8,7 +8,7 @@ import { removeLink } from '../link.js';
 import { log } from '../log.js';
 import { samePath } from '../paths.js';
 import { deleteLink, type LinkEntry, linkPathOf, loadLinks } from '../registry.js';
-import { projectZipName } from './zip.js';
+import { legacyZipName, projectZipName } from './zip.js';
 
 export interface UnlinkOptions {
   as?: string;
@@ -34,9 +34,10 @@ export function unapplyLink(entry: LinkEntry, storagePath?: string): boolean {
       removeExclude(entry.projectPath, excludeEntryFor(entry.projectPath, NOTE_FILE));
     }
     // A leftover zip stays hidden until the user deletes it.
-    const zipName = projectZipName(entry);
-    if (!fs.existsSync(path.join(entry.projectPath, zipName))) {
-      removeExclude(entry.projectPath, excludeEntryFor(entry.projectPath, zipName));
+    for (const zipName of [projectZipName(entry), legacyZipName(entry)]) {
+      if (!fs.existsSync(path.join(entry.projectPath, zipName))) {
+        removeExclude(entry.projectPath, excludeEntryFor(entry.projectPath, zipName));
+      }
     }
   }
   return removed;

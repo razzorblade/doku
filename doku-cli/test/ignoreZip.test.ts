@@ -8,6 +8,7 @@ import { linkCommand } from '../src/commands/link.js';
 import { unlinkCommand } from '../src/commands/unlink.js';
 import { zipCommand } from '../src/commands/zip.js';
 import { createMatcher, IGNORE_FILE, toRootPattern } from '../src/dokuignore.js';
+import type { Prompter } from '../src/prompt.js';
 import { gitIn, useSandbox } from './helpers.js';
 
 function zipEntries(file: string): string[] {
@@ -44,15 +45,15 @@ describe('ignore + zip', () => {
     return { project, docs, storageDir: path.join(box.storage, 'my-project') };
   }
 
-  it('matches the feature example: ignore two paths, zip only the rest', () => {
+  it('matches the feature example: ignore two paths, zip only the rest', async () => {
     const { project, storageDir } = myProject();
 
     ignoreCommand(['file1.md'], { cwd: project });
     ignoreCommand(['folder/'], { cwd: project });
     expect(fs.readFileSync(path.join(storageDir, IGNORE_FILE), 'utf8')).toBe('/file1.md\n/folder/\n');
 
-    const out = zipCommand('.', { cwd: project, silent: true });
-    expect(out).toBe(path.join(project, '.doku.zip'));
+    const out = (await zipCommand('.', { cwd: project, silent: true }))!;
+    expect(out).toBe(path.join(project, 'my-project.doku.zip'));
     expect(zipEntries(out)).toEqual(['.doku-meta.json', '.dokuignore', 'README.md', 'file2.md']);
 
     // The zip is hidden from the project's git, the ignored docs from the storage's git.
@@ -77,12 +78,12 @@ describe('ignore + zip', () => {
     expect(fs.readFileSync(path.join(storageDir, IGNORE_FILE), 'utf8')).toBe('/file1.md\n');
   });
 
-  it('fails outside a doku project', () => {
+  it('fails outside a doku project', async () => {
     myProject();
     const elsewhere = box.mkProject('unrelated');
     expect(() => ignoreCommand(['file1.md'], { cwd: elsewhere })).toThrow(/Not in a doku project/);
     expect(() => ignoreCommand([], { cwd: elsewhere })).toThrow(/Not in a doku project/);
-    expect(() => zipCommand('.', { cwd: elsewhere, silent: true })).toThrow(/Not in a doku project/);
+    await expect(zipCommand('.', { cwd: elsewhere, silent: true })).rejects.toThrow(/Not in a doku project/);
   });
 
   it('refuses paths outside the docs folder and the docs folder itself', () => {
@@ -99,13 +100,13 @@ describe('ignore + zip', () => {
     expect(fs.existsSync(path.join(storageDir, IGNORE_FILE))).toBe(false);
   });
 
-  it('zips the whole storage without .git and ignored files', () => {
+  it('zips the whole storage without .git and ignored files', async () => {
     const { project } = myProject();
     fs.writeFileSync(path.join(box.storage, IGNORE_FILE), '*.secret\n');
     fs.writeFileSync(path.join(box.storage, 'my-project', 'keys.secret'), 's');
     ignoreCommand(['folder'], { cwd: project });
 
-    const out = zipCommand(undefined, { cwd: box.root, silent: true });
+    const out = (await zipCommand(undefined, { cwd: box.root, silent: true, all: true }))!;
     expect(out).toBe(path.join(box.root, 'storage.zip'));
     expect(zipEntries(out)).toEqual([
       '.doku-meta.json',
@@ -118,7 +119,7 @@ describe('ignore + zip', () => {
     ]);
   });
 
-  it('honors .gitignore files inside the docs in zip, the same way git does in sync', () => {
+  it('honors .gitignore files inside the docs in zip, the same way git does in sync', async () => {
     const { project, docs } = myProject();
     fs.writeFileSync(path.join(docs, '.gitignore'), '*.tmp\n');
     fs.writeFileSync(path.join(docs, 'scratch.tmp'), 'x');
@@ -141,7 +142,7 @@ describe('ignore + zip', () => {
       'file2.md',
       'folder/inner.md',
     ];
-    expect(zipEntries(zipCommand('.', { cwd: project, silent: true }))).toEqual(expected);
+    expect(zipEntries((await zipCommand('.', { cwd: project, silent: true }))!)).toEqual(expected);
 
     // Sync (git add -A) picks exactly the same files.
     gitIn(box.storage, 'add', '-A');
@@ -153,10 +154,32 @@ describe('ignore + zip', () => {
     expect(['.doku-meta.json', ...committed].sort()).toEqual(expected);
   });
 
-  it('never writes a default zip into the storage', () => {
+  it('without a target zips the project you are in, and asks before zipping everything elsewhere', async () => {
+    const { project, docs } = myProject();
+    expect(await zipCommand(undefined, { cwd: project, silent: true })).toBe(path.join(project, 'my-project.doku.zip'));
+    expect(await zipCommand(undefined, { cwd: path.join(docs, 'folder'), silent: true })).toBe(path.join(project, 'my-project.doku.zip'));
+    expect(zipEntries(path.join(project, 'my-project.doku.zip'))).toContain('file1.md');
+
+    const elsewhere = box.mkProject('unrelated');
+    const no: Prompter = { ask: async () => 'n', close: () => {} };
+    const silent: Prompter = { ask: async () => null, close: () => {} };
+    const yes: Prompter = { ask: async () => 'y', close: () => {} };
+    expect(await zipCommand(undefined, { cwd: elsewhere, silent: true, prompter: no })).toBeNull();
+    expect(await zipCommand(undefined, { cwd: elsewhere, silent: true, prompter: silent })).toBeNull();
+    expect(fs.readdirSync(elsewhere)).toEqual(['.git']);
+    const all = await zipCommand(undefined, { cwd: elsewhere, silent: true, prompter: yes });
+    expect(all).toBe(path.join(elsewhere, 'storage.zip'));
+    expect(zipEntries(all!)).toContain('my-project/file1.md');
+    await expect(zipCommand('my-project', { all: true, silent: true })).rejects.toThrow(/not both/);
+  });
+
+  it('never writes a default zip into the storage', async () => {
     myProject();
-    const out = zipCommand(undefined, { cwd: path.join(box.storage, 'my-project'), silent: true });
+    const out = await zipCommand(undefined, { cwd: path.join(box.storage, 'my-project'), silent: true, all: true });
     expect(out).toBe(path.join(box.root, 'storage.zip'));
+    // Without --all, the project folder in the storage zips just that project, still next to the storage.
+    const one = await zipCommand(undefined, { cwd: path.join(box.storage, 'my-project'), silent: true });
+    expect(one).toBe(path.join(box.root, 'my-project.zip'));
   });
 
   it('matcher applies root and project rules', () => {
@@ -171,9 +194,9 @@ describe('ignore + zip', () => {
     expect(m('my-project/file2.md', false)).toBe(false);
   });
 
-  it('unlink drops the zip exclude once the zip is deleted', () => {
+  it('unlink drops the zip exclude once the zip is deleted', async () => {
     const { project } = myProject();
-    const out = zipCommand('.', { cwd: project, silent: true });
+    const out = (await zipCommand('.', { cwd: project, silent: true }))!;
     fs.rmSync(out);
     unlinkCommand(project, {});
     const exclude = fs.readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8');
