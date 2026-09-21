@@ -107,6 +107,8 @@ and from your projects. You don't need to run `git init` yourself: `doku init` d
 | Existing folder that is already a git repo | `doku init --storage <folder>` | Leaves git alone and just uses the folder. |
 | Storage already on a remote (second machine) | `doku init --clone <url>` | Clones it. The target folder must be empty or missing. |
 
+The storage always uses the branch `main`, whatever git's default branch is on the machine.
+
 The default storage location is `doku-storage/` inside this tool's folder. That is fine: the tool's repo
 ignores that folder, and the storage gets its own `.git`, so the two repositories never mix. `doku sync`
 refuses to run unless the storage is the root of its own repository.

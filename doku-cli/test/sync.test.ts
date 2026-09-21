@@ -13,13 +13,14 @@ describe('sync', () => {
     const result = syncStorage(box.storage, 'first');
     expect(result).toEqual({ committed: true, pulled: false, pushed: false });
     expect(gitIn(box.storage, 'log', '--format=%s')).toBe('first');
+    expect(gitIn(box.storage, 'branch', '--show-current')).toBe('main');
     expect(syncStorage(box.storage).committed).toBe(false);
   });
 
   it('round-trips changes between two machines through a remote', () => {
     const remote = path.join(box.root, 'remote.git');
     fs.mkdirSync(remote);
-    gitIn(remote, 'init', '-q', '--bare');
+    gitIn(remote, 'init', '-q', '--bare', '-b', 'main');
 
     // Machine A: new storage, add remote, first push.
     initCommand({ storage: box.storage });
