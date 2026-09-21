@@ -53,7 +53,7 @@ describe('ignore + zip', () => {
 
     const out = zipCommand('.', { cwd: project, silent: true });
     expect(out).toBe(path.join(project, '.doku.zip'));
-    expect(zipEntries(out)).toEqual(['.dokuignore', 'README.md', 'file2.md']);
+    expect(zipEntries(out)).toEqual(['.doku-meta.json', '.dokuignore', 'README.md', 'file2.md']);
 
     // The zip is hidden from the project's git, the ignored docs from the storage's git.
     expect(gitIn(project, 'status', '--porcelain', '--untracked-files=all')).toBe('?? Readme.md');
@@ -108,6 +108,7 @@ describe('ignore + zip', () => {
     const out = zipCommand(undefined, { cwd: box.root, silent: true });
     expect(out).toBe(path.join(box.root, 'storage.zip'));
     expect(zipEntries(out)).toEqual([
+      '.doku-meta.json',
       '.dokuignore',
       'README.md',
       'my-project/.dokuignore',

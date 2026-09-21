@@ -139,7 +139,7 @@ and `user.email`).
 - **Git but no remote:** `doku sync` still commits locally (handy as history and undo) and skips
   pull/push with a hint. Add a remote whenever you want.
 - **No git at all:** everything except `doku sync` works. Move docs between machines with `doku zip`
-  and unzip into the storage, or keep the storage folder in a synced folder like OneDrive. Don't combine
+  and `doku load`, or keep the storage folder in a synced folder like OneDrive. Don't combine
   a cloud-synced folder with git, as the cloud client can corrupt the `.git` folder.
 
 ### Moving the storage later
@@ -160,6 +160,7 @@ link on this machine.
 | `doku ignore [paths...]` | Keep files or folders on this machine only (not synced, not zipped). Without paths, lists the rules. |
 | `doku unignore <paths...>` | Undo `doku ignore`. |
 | `doku zip [target] [-o <file>] [-s]` | Zip the whole storage, or one project (`doku zip .`), then open the folder containing the zip. `-s`/`--silent` only prints the zip path. |
+| `doku load <zip> [--project <name>] [--merge\|--overwrite] [--link <path>\|--no-link] [-y]` | Load a zip into the storage. Asks before creating a project or changing existing files, and never deletes anything. |
 | `doku doctor [--fix] [--prune]` | Check links. `--fix` recreates missing or stale ones (e.g. after moving the storage); `--prune` forgets projects that no longer exist. |
 | `doku open [name]` | Open the storage, or one project's docs, in VS Code. |
 | `doku path [name]` | Print the storage path, or one project's docs path. |
@@ -222,6 +223,36 @@ doku zip my-project -o D:/backup/my-project.zip
 Ignored files are left out. A project zip written into the project is hidden from the project's git.
 A zip is never written into the storage itself; if you run `doku zip` there, it goes next to the storage.
 Unless you pass `--silent`, the folder containing the zip opens afterwards.
+
+## Loading a zip: `doku load`
+
+```sh
+doku load my-project.zip                    # project named in the zip
+doku load .doku.zip --project my-project    # load into this project instead
+doku load doku-storage.zip                  # whole-storage zip: every project in turn
+```
+
+`doku zip` puts a small `.doku-meta.json` into every zip that says which project (or the whole storage)
+it holds. `doku load` reads it to pick the storage project; the file itself is never extracted. For zips
+without it (made by hand or by the OS), doku suggests a name from the zip's single top folder or the zip's
+file name, and you can type another.
+
+- **New project:** doku says the project doesn't exist yet and asks before creating it. Afterwards it
+  offers to link it: type a project folder (`.` for the current one), or press Enter to skip and run
+  `doku link <projectPath> <name>` later.
+- **Existing project:** doku lists new files and files that differ, with line, character and size
+  changes (storage → zip), then asks what to do:
+  - **append** adds new files and keeps the differing ones as they are,
+  - **overwrite** adds new files and replaces the differing ones. Each replaced file is copied to
+    `~/.doku/backups/<name>-<time>/` first, outside the storage.
+  - **cancel** (the default) changes nothing.
+
+  Files that are only in the storage are always kept. Pass `--merge` or `--overwrite` to answer up front.
+- Without an answer (Enter on a yes/no question, or no terminal input), doku does the safe thing: it
+  creates nothing and changes nothing. `-y` creates missing projects without asking. It does not choose
+  between append and overwrite for you.
+- Entries with absolute paths, `..`, invalid names or `.git` are skipped, and doku never writes through
+  a link inside the storage.
 
 ## Things to know
 

@@ -5,6 +5,7 @@ import { ignoreCommand, unignoreCommand } from './commands/ignore.js';
 import { initCommand } from './commands/init.js';
 import { DEFAULT_LINK_NAME, linkCommand } from './commands/link.js';
 import { listCommand } from './commands/list.js';
+import { loadCommand } from './commands/load.js';
 import { openCommand, storagePathFor } from './commands/open.js';
 import { statusCommand } from './commands/status.js';
 import { unlinkCommand } from './commands/unlink.js';
@@ -16,9 +17,9 @@ import { assertSegment } from './paths.js';
 import { syncStorage } from './sync.js';
 
 function run<A extends unknown[]>(fn: (...args: A) => unknown) {
-  return (...args: A) => {
+  return async (...args: A) => {
     try {
-      const result = fn(...args);
+      const result = await fn(...args);
       if (typeof result === 'number') process.exitCode = result;
     } catch (err) {
       if (err instanceof DokuError) {
@@ -93,6 +94,18 @@ program
   .action(run((target: string | undefined, opts) => void zipCommand(target, opts)));
 
 program
+  .command('load')
+  .description('load a zip (from `doku zip`, or any zipped docs folder) into the storage; asks before changing anything')
+  .argument('<zipFile>', 'zip file to load')
+  .option('-p, --project <name>', 'storage project to load into (default: the one named in the zip)')
+  .option('--merge', 'existing project: add new files, keep existing ones that differ')
+  .option('--overwrite', 'existing project: add new files, replace differing ones (backed up to ~/.doku/backups first)')
+  .option('--link <projectPath>', 'link the project into this folder if it is not linked yet')
+  .option('--no-link', `don't offer to link the project`)
+  .option('-y, --yes', 'create missing projects without asking')
+  .action(run(async (zipFile: string, opts) => void (await loadCommand(zipFile, opts))));
+
+program
   .command('doctor')
   .description('check registered links; --fix recreates missing or stale ones')
   .option('--fix', 'repair links, git excludes and notes')
@@ -123,4 +136,4 @@ program
   .argument('[name]', 'project name in storage')
   .action(run((name?: string) => console.log(storagePathFor(name))));
 
-program.parse();
+await program.parseAsync();

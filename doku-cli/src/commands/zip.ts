@@ -8,7 +8,7 @@ import { log } from '../log.js';
 import { assertSegment, isInside } from '../paths.js';
 import type { LinkEntry } from '../registry.js';
 import { docsContextOf, projectAt } from '../resolve.js';
-import { collectFiles, writeZip } from '../zip.js';
+import { collectFiles, writeZip, type ZipMeta } from '../zip.js';
 import { revealInFolder } from './open.js';
 
 export interface ZipOptions {
@@ -61,7 +61,10 @@ export function zipCommand(target: string | undefined, opts: ZipOptions = {}): s
 
   // Keep git's view in sync with .dokuignore while we're at it.
   applyIgnoresToGit(storagePath);
-  const { count, bytes } = writeZip(collectFiles(storagePath, name), out);
+  const meta: ZipMeta = name
+    ? { doku: 1, kind: 'project', name, created: new Date().toISOString() }
+    : { doku: 1, kind: 'storage', created: new Date().toISOString() };
+  const { count, bytes } = writeZip(collectFiles(storagePath, name), out, meta);
 
   if (entry && !opts.output) addExclude(entry.projectPath, excludeEntryFor(entry.projectPath, projectZipName(entry)));
 
