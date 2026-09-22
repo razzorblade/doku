@@ -4,7 +4,7 @@ import { doctorCommand } from './commands/doctor.js';
 import { decryptCommand, encryptCommand, keyCommand, unlockCommand } from './commands/encrypt.js';
 import { ignoreCommand, unignoreCommand } from './commands/ignore.js';
 import { initCommand } from './commands/init.js';
-import { DEFAULT_LINK_NAME, linkCommand } from './commands/link.js';
+import { DEFAULT_LINK_NAME, linkFromCli } from './commands/link.js';
 import { listCommand } from './commands/list.js';
 import { loadCommand } from './commands/load.js';
 import { openCommand, storagePathFor } from './commands/open.js';
@@ -59,13 +59,25 @@ program
 
 program
   .command('link')
-  .description(`link a project's docs into it as ${DEFAULT_LINK_NAME}/`)
-  .argument('[projectPath]', 'project folder (default: current folder)')
-  .argument('[name]', 'folder name in storage (default: project folder name)')
+  .description(`link a project's docs into it as ${DEFAULT_LINK_NAME}/, or switch it to other docs`)
+  .argument('[projectPath]', 'project folder (default: current folder); or, alone, the docs name to link the current folder to')
+  .argument('[name]', 'docs name in storage (default: project folder name, or asks when those docs don\'t exist yet)')
   .option('--as <linkName>', 'folder name inside the project', DEFAULT_LINK_NAME)
   .option('--no-agents-note', `don't add a note for AI assistants to CLAUDE.local.md`)
+  .addHelpText(
+    'after',
+    `
+Examples:
+  doku link                        link the current folder to docs of the same name
+  doku link web-shop               link the current folder to the docs "web-shop",
+                                   e.g. when the folder is named differently on this machine
+  doku link C:/work/app my-app     link C:/work/app to the docs "my-app"
+
+Each machine remembers its own links, so the folder name can differ per machine.
+Linking a project that is already linked switches it to the new docs; the old docs stay in storage.`,
+  )
   .action(
-    run((projectPath: string | undefined, name: string | undefined, opts) => void linkCommand(projectPath, name, opts)),
+    run(async (projectPath: string | undefined, name: string | undefined, opts) => void (await linkFromCli(projectPath, name, opts))),
   );
 
 program

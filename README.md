@@ -92,8 +92,19 @@ doku init --clone <your-private-repo-url>
 doku link D:/work/my-cool-project my-cool-project
 ```
 
-Project paths can differ between machines. Links are recorded per machine in `~/.doku/links.json`,
-never in the storage.
+Project paths, and even project folder names, can differ between machines. Links are recorded per
+machine in `~/.doku/links.json`, never in the storage. If the folder is named differently here, link
+it to its docs by name from inside it:
+
+```sh
+cd D:/work/project-def
+doku link project-abc                      # .doku/ → the docs "project-abc"
+```
+
+A plain `doku link` in a folder whose name has no docs yet lists the docs not linked on this machine
+and asks which to use, or whether to start new ones. Running `doku link <name>` in a project that is
+already linked switches it to those docs. If the old docs were only the empty starter folder from
+`doku link`, it is removed; otherwise it stays in the storage.
 
 ## Setting up the storage with git
 
@@ -255,7 +266,7 @@ unencrypted.
 | Command | What it does |
 |---|---|
 | `doku init [--storage <path>] [--clone <url>] [--key-file <file>]` | Set the storage for this machine: create it (with `git init`), or clone an existing one (asking for the key when it is encrypted). Running it again keeps the current storage. |
-| `doku link [projectPath] [name] [--as <folder>] [--no-agents-note]` | Create `storage/<name>/` if needed and link it into the project as `.doku/` (or `--as`). Without a path, links the current folder; inside the storage the path is required. |
+| `doku link [projectPath] [name] [--as <folder>] [--no-agents-note]` | Create `storage/<name>/` if needed and link it into the project as `.doku/` (or `--as`). Without a path, links the current folder; inside the storage the path is required. `doku link <name>` alone links the current folder to the docs `<name>`, and re-linking a project switches it to other docs. |
 | `doku unlink <projectPath\|name> [--as <folder>] [--all]` | Remove the link and everything `link` added to the project. The docs stay in storage. |
 | `doku list` | Projects in storage and where each one is linked on this machine. |
 | `doku status` | Health of every link, plus uncommitted changes in the storage. |
