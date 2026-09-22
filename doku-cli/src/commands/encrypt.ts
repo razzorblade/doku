@@ -183,7 +183,7 @@ export async function encryptCommand(opts: EncryptOptions = {}): Promise<Encrypt
     if (remoteHead) {
       log.warn('The remote already holds the unencrypted history. The next `doku sync` replaces it (force push).');
       log.info('  Hosts like GitHub can keep deleted commits cached for a while, and forks or other clones keep');
-      log.info('  theirs. The safest option is a new, empty repository: `git remote set-url origin <new-url>` now.');
+      log.info('  theirs. The safest option is a new, empty repository: `doku remote set <new-url>` now.');
       log.info('  Other machines then run `doku unlock` once to switch to the encrypted history.');
     }
     if (!opts.yes && !(await confirm(p, 'Encrypt the storage?'))) {
@@ -254,7 +254,7 @@ export async function encryptCommand(opts: EncryptOptions = {}): Promise<Encrypt
     log.info(
       hasOrigin(storage)
         ? '  Run `doku sync` to push it. On other machines: `doku init --clone <url>` (asks for the key), or `doku unlock` in an existing clone.'
-        : '  Add a remote and run `doku sync` to push it; `doku init --clone <url>` on other machines asks for the key.',
+        : '  Add a remote with `doku remote set <url>` and run `doku sync` to push it; `doku init --clone <url>` on other machines asks for the key.',
     );
     return { recoveryKey: recovery, replacesRemote: !!remoteHead, historyBackup };
   });

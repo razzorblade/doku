@@ -73,7 +73,7 @@ Run `doku unlink` on each project first if you want to remove the links too.
 
 ```sh
 doku init                                   # creates doku-storage/ and runs git init there
-cd doku-storage && git remote add origin <your-private-repo-url> && cd ..
+doku remote set <your-private-repo-url>      # the storage's git remote, for syncing
 doku link C:/projects/my-cool-project       # storage name defaults to the folder name
 doku sync                                   # commit + pull --rebase + push
 ```
@@ -119,22 +119,23 @@ refuses to run unless the storage is the root of its own repository.
    These are your private notes, so keep the repository private. If even a private repository is
    not enough for what's in them (client data, for example), run `doku encrypt` before the first
    push. See [Encrypting the storage](#encrypting-the-storage).
-2. Add it as `origin` in the storage and push once:
+2. Set it as the storage's remote and push once. This works from any folder:
 
    ```sh
-   cd "$(doku path)"
-   git remote add origin <your-private-repo-url>
+   doku remote set <your-private-repo-url>
    doku sync          # commits everything and pushes, setting up tracking the first time
    ```
 
    With the GitHub CLI, step 1 and 2 can be one command run inside the storage:
-   `gh repo create doku-storage --private --source . --push`.
+   `gh repo create doku-storage --private --source "$(doku path)" --push`.
 
 3. On every other machine: `doku init --clone <your-private-repo-url>`. For an encrypted storage it asks for
    the recovery key or passphrase.
 
-From then on `doku sync` does `git add -A`, commits, `pull --rebase` and pushes. The remote must be
-named `origin` for the first push. Commits use your normal git identity (`git config --global user.name`
+From then on `doku sync` does `git add -A`, commits, `pull --rebase` and pushes. `doku remote` shows
+the remote, `doku remote set <url>` points the storage at another repository (e.g. after moving it), and
+`doku remote remove` takes it away. The remote is the storage's git remote `origin`, so one added with
+plain git works too. Commits use your normal git identity (`git config --global user.name`
 and `user.email`).
 
 ### Without a remote, or without git
@@ -209,7 +210,7 @@ current files are all kept. `--backup-history` saves the old history as a git bu
 If the remote already has the old history, the next `doku sync` replaces it with a force push. Hosts
 like GitHub can keep deleted commits cached for a while, and forks or other clones keep their copies.
 The safest option is to push to a **new, empty repository** instead
-(`git -C "$(doku path)" remote set-url origin <new-url>` before `doku sync`), and delete the old one.
+(`doku remote set <new-url>` before `doku sync`), and delete the old one.
 
 Other machines that have the old history get a message on their next `doku sync` telling them to run
 `doku unlock`. That command asks for the key and switches the machine to the encrypted history. Files
@@ -259,6 +260,7 @@ unencrypted.
 | `doku list` | Projects in storage and where each one is linked on this machine. |
 | `doku status` | Health of every link, plus uncommitted changes in the storage. |
 | `doku sync [-m <msg>]` | `git add -A`, commit, `pull --rebase`, `push` in the storage. |
+| `doku remote [set <url>\|remove]` | Show the storage's git remote, add it or point it at another repository (`set`, alias `add`), or remove it. |
 | `doku encrypt [--passphrase\|--no-passphrase] [--key-file <file>] [--backup-history] [-y]` | Encrypt the storage in git and in zips; files stay plain on this machine. Replaces the history with one encrypted commit. See [Encrypting the storage](#encrypting-the-storage). |
 | `doku unlock [--key-file <file>]` | Enter the recovery key or passphrase of an encrypted storage on this machine. |
 | `doku key [--passphrase\|--no-passphrase]` | Show the recovery key, or set, change or remove the passphrase. |

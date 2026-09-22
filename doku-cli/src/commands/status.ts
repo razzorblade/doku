@@ -6,6 +6,7 @@ import { isRepoRoot, tryGit } from '../git.js';
 import { describeHealth, linkHealth } from '../health.js';
 import { log, pc } from '../log.js';
 import { linkPathOf, loadLinks } from '../registry.js';
+import { originUrl } from './remote.js';
 
 export function statusCommand(): void {
   const { storagePath } = requireConfig();
@@ -27,6 +28,8 @@ export function statusCommand(): void {
     log.warn('  not its own git repository; run `doku init` to set it up');
     return;
   }
+  const url = originUrl(storagePath);
+  log.info(url ? `  remote: ${url}` : pc.dim('  remote: none (`doku remote set <url>` adds one)'));
   const crypt = cryptState(storagePath);
   if (crypt === 'off') log.info(pc.dim('  encryption: off (`doku encrypt` turns it on)'));
   else if (crypt === 'unlocked') log.info(`  encryption: on (${CIPHER}), unlocked on this machine`);

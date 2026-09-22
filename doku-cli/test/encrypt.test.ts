@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { decryptCommand, encryptCommand, keyCommand, unlockCommand } from '../src/commands/encrypt.js';
 import { initCommand } from '../src/commands/init.js';
 import { loadCommand } from '../src/commands/load.js';
+import { setRemoteCommand } from '../src/commands/remote.js';
 import { zipCommand } from '../src/commands/zip.js';
 import { isEncrypted, MAGIC } from '../src/crypto.js';
 import {
@@ -275,6 +276,26 @@ describe('encryption', () => {
     expect(tryGit(storageB, ['config', '--get-regexp', 'doku']).stdout).toBe('');
     expect(gitIn(remote, 'show', 'main:proj/b.md')).toBe('after decrypt');
     expect(read(storageB, 'proj', 'notes.md')).toContain(CANARY);
+  });
+
+  it('pushes to a new, empty remote instead of replacing the old unencrypted one', async () => {
+    usedStorage();
+    const oldRemote = bareRemote();
+    setRemoteCommand(oldRemote);
+    syncStorage(box.storage);
+    const { replacesRemote } = await encryptA();
+    expect(replacesRemote).toBe(true);
+
+    const newRemote = path.join(box.root, 'new.git');
+    fs.mkdirSync(newRemote);
+    gitIn(newRemote, 'init', '-q', '--bare', '-b', 'main');
+    setRemoteCommand(newRemote);
+    expect(syncStorage(box.storage)).toMatchObject({ pushed: true });
+    expect(readLocalState(box.storage).replaceRemote).toBeUndefined();
+    expect(gitIn(newRemote, 'rev-list', '--count', 'main')).toBe('1');
+    expect(plaintextBlobs(newRemote, ['--all'])).toEqual([]);
+    // The old remote is left alone.
+    expect(gitIn(oldRemote, 'show', 'main:proj/notes.md')).toContain(CANARY);
   });
 
   it('replaces unencrypted history already on the remote, and moves old clones over', async () => {

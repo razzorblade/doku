@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { disableLocally } from './commands/encrypt.js';
+import { STORAGE_BRANCH } from './commands/init.js';
 import { applyIgnoresToGit } from './dokuignore.js';
 import {
   CRYPT_FILE,
@@ -99,16 +100,25 @@ export function syncStorage(storagePath: string, message?: string): SyncResult {
   if (!result.committed) log.step('Nothing to commit');
 
   if (git(storagePath, ['remote']) === '') {
-    log.warn('No git remote configured for the storage; skipping pull/push. Add one with `git remote add origin <url>`.');
+    log.warn('No git remote configured for the storage; skipping pull/push. Add one with `doku remote set <url>`.');
     return result;
   }
 
   // `doku encrypt` replaced the history; the remote still has the old, unencrypted one.
-  const { replaceRemote } = readLocalState(storagePath);
+  let { replaceRemote } = readLocalState(storagePath);
+  if (replaceRemote) {
+    // Pointed at a new, empty repository since: nothing to replace, a normal first push will do.
+    log.step('git fetch --prune origin');
+    if (!gitInteractive(storagePath, ['fetch', '-q', '--prune', 'origin'])) throw new DokuError('git fetch failed (see output above).');
+    if (!tryGit(storagePath, ['rev-parse', '-q', '--verify', `refs/remotes/origin/${STORAGE_BRANCH}`]).ok) {
+      writeLocalState(storagePath, { ...readLocalState(storagePath), replaceRemote: undefined });
+      replaceRemote = undefined;
+    }
+  }
   if (replaceRemote) {
     verifyEncrypted(storagePath, ['HEAD']);
     log.step('git push --force-with-lease (replacing the unencrypted history on the remote)');
-    const pushed = gitInteractive(storagePath, ['push', '-u', `--force-with-lease=main:${replaceRemote}`, 'origin', 'HEAD']);
+    const pushed = gitInteractive(storagePath, ['push', '-u', `--force-with-lease=${STORAGE_BRANCH}:${replaceRemote}`, 'origin', 'HEAD']);
     if (!pushed) {
       throw new DokuError(
         'git push failed (see output above). If another machine pushed after `doku encrypt`, its changes are ' +

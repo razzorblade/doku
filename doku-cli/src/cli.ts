@@ -8,6 +8,7 @@ import { DEFAULT_LINK_NAME, linkCommand } from './commands/link.js';
 import { listCommand } from './commands/list.js';
 import { loadCommand } from './commands/load.js';
 import { openCommand, storagePathFor } from './commands/open.js';
+import { removeRemoteCommand, setRemoteCommand, showRemoteCommand } from './commands/remote.js';
 import { statusCommand } from './commands/status.js';
 import { unlinkCommand } from './commands/unlink.js';
 import { zipCommand } from './commands/zip.js';
@@ -84,6 +85,16 @@ program
   .description('commit storage changes, pull --rebase and push')
   .option('-m, --message <msg>', 'commit message')
   .action(run((opts: { message?: string }) => void syncStorage(requireConfig().storagePath, opts.message)));
+
+const remote = program.command('remote').description(`show or change the storage's git remote (origin), used by \`doku sync\``);
+remote.command('show', { isDefault: true }).description('print the remote URL').action(run(showRemoteCommand));
+remote
+  .command('set')
+  .alias('add')
+  .description('add the remote, or point it at another repository')
+  .argument('<url>', 'git URL of a private repository, ideally empty')
+  .action(run((url: string) => setRemoteCommand(url)));
+remote.command('remove').alias('rm').description('remove the remote; `doku sync` then only commits locally').action(run(removeRemoteCommand));
 
 program
   .command('encrypt')
