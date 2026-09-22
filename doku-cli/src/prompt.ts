@@ -4,7 +4,19 @@ import readline from 'node:readline';
 export interface Prompter {
   /** One line of input, or null once input has ended (e.g. stdin is not a terminal). */
   ask(question: string): Promise<string | null>;
+  /** Like `ask`, without echoing what is typed (keys, passphrases). Falls back to `ask`. */
+  askSecret?(question: string): Promise<string | null>;
   close(): void;
+}
+
+/** Apply backspaces typed in raw mode, where the terminal does no line editing. */
+function applyBackspaces(raw: string): string {
+  const out: string[] = [];
+  for (const ch of raw) {
+    if (ch === '\x7f' || ch === '\b') out.pop();
+    else out.push(ch);
+  }
+  return out.join('');
 }
 
 /** Reads answers line by line from stdin; works with a terminal and with piped input. */
@@ -29,21 +41,52 @@ export function stdinPrompter(): Prompter {
       waiting = undefined;
     });
   };
+  const nextLine = (): Promise<string | null> => {
+    if (lines.length) return Promise.resolve(lines.shift()!);
+    if (ended) {
+      process.stdout.write('\n');
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => (waiting = resolve));
+  };
   return {
     ask(question) {
       open();
       process.stdout.write(question);
-      if (lines.length) return Promise.resolve(lines.shift()!);
-      if (ended) {
+      return nextLine();
+    },
+    async askSecret(question) {
+      const stdin = process.stdin;
+      if (!stdin.isTTY) return this.ask(question);
+      open();
+      process.stdout.write(question);
+      // Raw mode turns off the terminal's echo. Enter still ends the line for readline.
+      const onData = (chunk: Buffer) => {
+        if (chunk.includes(3)) {
+          stdin.setRawMode(false);
+          process.stdout.write('\n');
+          process.exit(130);
+        }
+      };
+      stdin.setRawMode(true);
+      stdin.on('data', onData);
+      try {
+        const line = await nextLine();
+        return line === null ? null : applyBackspaces(line);
+      } finally {
+        stdin.off('data', onData);
+        stdin.setRawMode(false);
         process.stdout.write('\n');
-        return Promise.resolve(null);
       }
-      return new Promise((resolve) => (waiting = resolve));
     },
     close() {
       rl?.close();
     },
   };
+}
+
+export function askSecret(p: Prompter, question: string): Promise<string | null> {
+  return p.askSecret ? p.askSecret(question) : p.ask(question);
 }
 
 /** Yes/no question. Without input the answer is always no, whatever the default. */

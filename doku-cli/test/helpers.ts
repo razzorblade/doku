@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, vi } from 'vitest';
+import { TEST_CLI } from './cliPath.js';
 
 export interface Sandbox {
   root: string;
@@ -27,6 +28,7 @@ export function useSandbox(): Sandbox {
       return dir;
     };
     vi.stubEnv('DOKU_HOME', path.join(box.root, 'home'));
+    vi.stubEnv('DOKU_CLI_ENTRY', TEST_CLI);
     vi.stubEnv('GIT_AUTHOR_NAME', 'doku test');
     vi.stubEnv('GIT_AUTHOR_EMAIL', 'test@example.com');
     vi.stubEnv('GIT_COMMITTER_NAME', 'doku test');

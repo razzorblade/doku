@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { dokuHome, requireConfig } from '../config.js';
+import { keyIdHex, type StorageKey } from '../crypto.js';
 import { applyIgnoresToGit } from '../dokuignore.js';
+import { askForKey, CRYPT_FILE, cryptState, keyFromFile, readKey } from '../encryption.js';
 import { DokuError } from '../errors.js';
 import { isRepoRoot } from '../git.js';
 import { log, pc } from '../log.js';
@@ -9,7 +11,7 @@ import { assertSegment } from '../paths.js';
 import { choose, confirm, type Prompter, stdinPrompter } from '../prompt.js';
 import { type LinkEntry, loadLinks } from '../registry.js';
 import { docsContextOf, projectAt } from '../resolve.js';
-import { readZip, type ZipContents } from '../zip.js';
+import { openEncryptedZip, readZip, type ZipContents } from '../zip.js';
 import { linkCommand } from './link.js';
 
 export interface LoadOptions {
@@ -25,6 +27,8 @@ export interface LoadOptions {
   all?: boolean;
   /** Create missing projects without asking. */
   yes?: boolean;
+  /** Encrypted zip: file with the recovery key (instead of asking). */
+  keyFile?: string;
   cwd?: string;
   prompter?: Prompter;
 }
@@ -335,7 +339,7 @@ function splitStorageZip(zip: ZipContents) {
     const slash = rel.indexOf('/');
     const top = slash === -1 ? '' : rel.slice(0, slash);
     if (!top || top.startsWith('.')) {
-      rootFiles.set(rel, data);
+      if (rel !== CRYPT_FILE) rootFiles.set(rel, data);
       continue;
     }
     if (!groups.has(top)) groups.set(top, new Map());
@@ -432,32 +436,53 @@ export async function loadCommand(zipFile: string, opts: LoadOptions = {}): Prom
   if (opts.merge && opts.overwrite) throw new DokuError('Pass either --merge or --overwrite, not both.');
   const cwd = opts.cwd ?? process.cwd();
   const zipPath = path.resolve(cwd, zipFile);
-  const zip = readZip(zipPath);
+  const p = opts.prompter ?? stdinPrompter();
+  try {
+    const zip = await decryptIfNeeded(readZip(zipPath), zipPath, storagePath, opts, cwd, p);
+    return await loadZip(zip, zipPath, storagePath, opts, cwd, p);
+  } finally {
+    if (!opts.prompter) p.close();
+  }
+}
+
+/** An encrypted zip opens with this storage's key when it is the same one; otherwise ask for its key. */
+async function decryptIfNeeded(zip: ZipContents, zipPath: string, storagePath: string, opts: LoadOptions, cwd: string, p: Prompter) {
+  const info = zip.meta?.encrypted;
+  if (!info) return zip;
+  let key: StorageKey | null = null;
+  if (isRepoRoot(storagePath) && cryptState(storagePath) === 'unlocked') {
+    const own = readKey(storagePath);
+    if (own && keyIdHex(own) === info.keyId) key = own;
+  }
+  if (!key) {
+    log.info(`The zip is encrypted with another key than this storage's. Enter its recovery key${info.passphrase ? ' or passphrase' : ''}.`);
+    key = opts.keyFile ? keyFromFile(path.resolve(cwd, opts.keyFile), info) : await askForKey(p, info, 'cancel');
+    if (!key) throw new DokuError('No key given; nothing was loaded.');
+  }
+  return openEncryptedZip(zip, key, zipPath);
+}
+
+async function loadZip(zip: ZipContents, zipPath: string, storagePath: string, opts: LoadOptions, cwd: string, p: Prompter) {
   if (zip.skipped.length) {
     log.warn(`Skipping ${zip.skipped.length} entr${zip.skipped.length === 1 ? 'y' : 'ies'} with unsafe paths or .git:\n${preview(zip.skipped)}`);
   }
   if (!zip.files.size) throw new DokuError(`${zipPath} contains no files to load.`);
 
-  const p = opts.prompter ?? stdinPrompter();
-  try {
-    let results: LoadResult[];
-    if (zip.meta?.kind === 'storage') {
-      results = await loadStorageZip(zip, storagePath, opts, cwd, p);
-    } else {
-      if (opts.all) throw new DokuError(`This zip holds a single project${zip.meta?.name ? ` ("${zip.meta.name}")` : ''}, so --all does not apply.`);
-      const name = await pickName(zip, zipPath, opts, cwd, p);
-      if (!name) throw new DokuError('No project name given; nothing was written. Pass one with `--project <name>`.');
-      const r = await loadInto(name, zip.files, storagePath, opts, p);
-      if (r) r.linked = await offerLink(name, opts, cwd, p);
-      results = r ? [r] : [];
-    }
-
-    if (results.some((r) => r.added.length || r.overwritten.length)) {
-      applyIgnoresToGit(storagePath);
-      if (isRepoRoot(storagePath)) log.info('Run `doku sync` to commit and push the loaded docs.');
-    }
-    return results;
-  } finally {
-    if (!opts.prompter) p.close();
+  let results: LoadResult[];
+  if (zip.meta?.kind === 'storage') {
+    results = await loadStorageZip(zip, storagePath, opts, cwd, p);
+  } else {
+    if (opts.all) throw new DokuError(`This zip holds a single project${zip.meta?.name ? ` ("${zip.meta.name}")` : ''}, so --all does not apply.`);
+    const name = await pickName(zip, zipPath, opts, cwd, p);
+    if (!name) throw new DokuError('No project name given; nothing was written. Pass one with `--project <name>`.');
+    const r = await loadInto(name, zip.files, storagePath, opts, p);
+    if (r) r.linked = await offerLink(name, opts, cwd, p);
+    results = r ? [r] : [];
   }
+
+  if (results.some((r) => r.added.length || r.overwritten.length)) {
+    applyIgnoresToGit(storagePath);
+    if (isRepoRoot(storagePath)) log.info('Run `doku sync` to commit and push the loaded docs.');
+  }
+  return results;
 }

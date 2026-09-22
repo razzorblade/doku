@@ -2,14 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { requireConfig } from '../config.js';
 import { applyIgnoresToGit } from '../dokuignore.js';
+import { cryptMeta, cryptState, LOCKED_HINT, requireKey } from '../encryption.js';
 import { DokuError } from '../errors.js';
+import { isRepoRoot } from '../git.js';
 import { addExclude, excludeEntryFor } from '../gitExclude.js';
-import { log } from '../log.js';
+import { log, pc } from '../log.js';
 import { assertSegment, isInside } from '../paths.js';
 import type { LinkEntry } from '../registry.js';
 import { docsContextOf, projectAt } from '../resolve.js';
 import { confirm, type Prompter, stdinPrompter } from '../prompt.js';
-import { collectFiles, writeZip, type ZipMeta } from '../zip.js';
+import { collectFiles, writeZip, type ZipMeta, type ZipSeal } from '../zip.js';
 import { storageProjects } from './list.js';
 import { revealInFolder } from './open.js';
 
@@ -18,6 +20,8 @@ export interface ZipOptions {
   silent?: boolean;
   /** Zip the whole storage without asking. */
   all?: boolean;
+  /** Encrypted storage: write an unencrypted zip anyway. */
+  plain?: boolean;
   cwd?: string;
   prompter?: Prompter;
 }
@@ -107,6 +111,13 @@ export async function zipCommand(target: string | undefined, opts: ZipOptions = 
   }
   const { name, entry } = picked;
 
+  // An encrypted storage makes encrypted zips, unless --plain.
+  const crypt = isRepoRoot(storagePath) ? cryptState(storagePath) : 'off';
+  if (crypt === 'locked') throw new DokuError(LOCKED_HINT);
+  let seal: ZipSeal | undefined;
+  if (crypt === 'unlocked' && !opts.plain) seal = { key: requireKey(storagePath), passphrase: cryptMeta(storagePath)?.passphrase };
+  if (crypt === 'unlocked' && opts.plain) log.warn('The storage is encrypted, but --plain writes this zip unencrypted.');
+
   let out: string;
   if (opts.output) out = path.resolve(cwd, opts.output);
   else if (entry) out = path.join(entry.projectPath, projectZipName(entry));
@@ -117,14 +128,15 @@ export async function zipCommand(target: string | undefined, opts: ZipOptions = 
   const meta: ZipMeta = name
     ? { doku: 1, kind: 'project', name, created: new Date().toISOString() }
     : { doku: 1, kind: 'storage', created: new Date().toISOString() };
-  const { count, bytes } = writeZip(collectFiles(storagePath, name), out, meta);
+  const { count, bytes } = writeZip(collectFiles(storagePath, name), out, meta, seal);
 
   if (entry && !opts.output) addExclude(entry.projectPath, excludeEntryFor(entry.projectPath, projectZipName(entry)));
 
   if (opts.silent) {
     console.log(out);
   } else {
-    log.ok(`Zipped ${count} file(s) from ${name ?? 'the whole storage'} (${(bytes / 1024).toFixed(1)} KB)`);
+    log.ok(`Zipped ${count} file(s) from ${name ?? 'the whole storage'} (${(bytes / 1024).toFixed(1)} KB${seal ? ', encrypted' : ''})`);
+    if (seal) log.info(pc.dim(`  Only \`doku load\` opens it, with this storage's recovery key${seal.passphrase ? ' or passphrase' : ''}.`));
     log.info(`  ${out}`);
     revealInFolder(out);
   }

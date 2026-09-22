@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { requireConfig } from '../config.js';
+import { cryptState, filtersInstalled, installFilters } from '../encryption.js';
+import { isRepoRoot } from '../git.js';
 import { describeHealth, linkHealth } from '../health.js';
 import { removeLink } from '../link.js';
 import { log } from '../log.js';
@@ -53,6 +55,17 @@ export function doctorCommand(opts: DoctorOptions): number {
     if (health === 'mismatch' || health === 'broken') removeLink(linkPathOf(entry));
     applyLink(entry, storagePath);
     log.ok(health === 'ok' ? `${label}: ok` : `${label}: repaired`);
+  }
+
+  // Encryption: git must run this doku as the filter (its path changes when doku-cli moves).
+  if (isRepoRoot(storagePath) && cryptState(storagePath) === 'unlocked' && !filtersInstalled(storagePath)) {
+    if (opts.fix) {
+      installFilters(storagePath);
+      log.ok('Encryption filter: repaired');
+    } else {
+      log.warn('Encryption filter: git is not set up to run this doku (e.g. doku-cli was moved)');
+      remaining++;
+    }
   }
 
   if (remaining === 0) log.ok('All links healthy');

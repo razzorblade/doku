@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { agentsSnippet } from './agentsNote.js';
 import { doctorCommand } from './commands/doctor.js';
+import { decryptCommand, encryptCommand, keyCommand, unlockCommand } from './commands/encrypt.js';
 import { ignoreCommand, unignoreCommand } from './commands/ignore.js';
 import { initCommand } from './commands/init.js';
 import { DEFAULT_LINK_NAME, linkCommand } from './commands/link.js';
@@ -11,7 +12,9 @@ import { statusCommand } from './commands/status.js';
 import { unlinkCommand } from './commands/unlink.js';
 import { zipCommand } from './commands/zip.js';
 import { requireConfig } from './config.js';
+import { cryptState } from './encryption.js';
 import { DokuError } from './errors.js';
+import { runFilterProcess, runMergeDriver, runTextconv } from './filterProcess.js';
 import { log } from './log.js';
 import { assertSegment } from './paths.js';
 import { syncStorage } from './sync.js';
@@ -42,7 +45,16 @@ program
   .description('set up the storage on this machine (new, existing, or cloned)')
   .option('-s, --storage <path>', 'storage folder (default: doku-storage next to doku-cli)')
   .option('-c, --clone <gitUrl>', 'clone an existing storage repository into the storage folder')
-  .action(run((opts) => void initCommand(opts)));
+  .option('--key-file <file>', 'encrypted storage: file with the recovery key (instead of asking)')
+  .action(
+    run(async (opts: { storage?: string; clone?: string; keyFile?: string }) => {
+      const storage = initCommand(opts);
+      if (opts.clone && cryptState(storage) === 'locked') {
+        log.info('This storage is encrypted. With its key, the files are decrypted on this machine now.');
+        await unlockCommand({ keyFile: opts.keyFile });
+      }
+    }),
+  );
 
 program
   .command('link')
@@ -74,6 +86,34 @@ program
   .action(run((opts: { message?: string }) => void syncStorage(requireConfig().storagePath, opts.message)));
 
 program
+  .command('encrypt')
+  .description('encrypt the storage in git and zips (files stay plain on this machine); replaces the history')
+  .option('--passphrase', 'also allow unlocking with a passphrase (asked for)')
+  .option('--no-passphrase', 'recovery key only, without asking')
+  .option('--key-file <file>', 'also write the recovery key to this file')
+  .option('--backup-history', 'keep the old unencrypted history as a git bundle in ~/.doku/backups')
+  .option('-y, --yes', "don't ask for the go-ahead (with --key-file, also not to confirm the key)")
+  .action(run(async (opts) => void (await encryptCommand(opts))));
+
+program
+  .command('unlock')
+  .description('enter the key of an encrypted storage on this machine, so its files are decrypted here')
+  .option('--key-file <file>', 'file with the recovery key (instead of asking)')
+  .action(run(async (opts) => void (await unlockCommand(opts))));
+
+program
+  .command('key')
+  .description('show the recovery key of the encrypted storage; --passphrase sets or changes the passphrase')
+  .option('--passphrase', 'set or change the passphrase')
+  .option('--no-passphrase', 'remove the passphrase (only the recovery key unlocks then)')
+  .action(run(async (opts) => void (await keyCommand(opts))));
+
+program
+  .command('decrypt')
+  .description('turn encryption off; the next sync pushes every file unencrypted')
+  .action(run(async () => void (await decryptCommand())));
+
+program
   .command('ignore')
   .description('keep docs on this machine only (not synced, not zipped); no paths lists the rules')
   .argument('[paths...]', 'files, folders or globs, relative to the docs folder when run in a project')
@@ -92,6 +132,7 @@ program
   .option('-a, --all', 'zip the whole storage without asking')
   .option('-o, --output <file>', 'where to write the zip')
   .option('-s, --silent', `don't open the folder; print only the zip path`)
+  .option('--plain', 'encrypted storage: write the zip unencrypted')
   .action(run(async (target: string | undefined, opts) => void (await zipCommand(target, opts))));
 
 program
@@ -105,6 +146,7 @@ program
   .option('--link <projectPath>', 'link the project into this folder if it is not linked yet')
   .option('--no-link', `don't offer to link the project`)
   .option('-y, --yes', 'create missing projects without asking')
+  .option('--key-file <file>', 'encrypted zip: file with its recovery key (instead of asking)')
   .action(run(async (zipFile: string, opts) => void (await loadCommand(zipFile, opts))));
 
 program
@@ -137,5 +179,18 @@ program
   .description('print the storage path (or one project in it)')
   .argument('[name]', 'project name in storage')
   .action(run((name?: string) => console.log(storagePathFor(name))));
+
+// Run by git in an encrypted storage (see encryption.ts); not for direct use.
+program.command('filter-process', { hidden: true }).action(() => runFilterProcess());
+program
+  .command('textconv', { hidden: true })
+  .argument('<file>')
+  .action((file: string) => runTextconv(file));
+program
+  .command('merge-driver', { hidden: true })
+  .arguments('<base> <ours> <theirs> [markerSize]')
+  .action((base: string, ours: string, theirs: string, markerSize?: string) => {
+    process.exitCode = runMergeDriver(base, ours, theirs, markerSize);
+  });
 
 await program.parseAsync();

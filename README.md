@@ -116,7 +116,9 @@ refuses to run unless the storage is the root of its own repository.
 ### Connecting a remote (needed for syncing between machines)
 
 1. Create an empty **private** repository on GitHub, GitLab or similar (no README, no .gitignore).
-   These are your private notes, so keep the repository private.
+   These are your private notes, so keep the repository private. If even a private repository is
+   not enough for what's in them (client data, for example), run `doku encrypt` before the first
+   push. See [Encrypting the storage](#encrypting-the-storage).
 2. Add it as `origin` in the storage and push once:
 
    ```sh
@@ -128,7 +130,8 @@ refuses to run unless the storage is the root of its own repository.
    With the GitHub CLI, step 1 and 2 can be one command run inside the storage:
    `gh repo create doku-storage --private --source . --push`.
 
-3. On every other machine: `doku init --clone <your-private-repo-url>`.
+3. On every other machine: `doku init --clone <your-private-repo-url>`. For an encrypted storage it asks for
+   the recovery key or passphrase.
 
 From then on `doku sync` does `git add -A`, commits, `pull --rebase` and pushes. The remote must be
 named `origin` for the first push. Commits use your normal git identity (`git config --global user.name`
@@ -147,20 +150,123 @@ and `user.email`).
 Move or copy the folder, run `doku init --storage <new path>`, then `doku doctor --fix` to repoint every
 link on this machine.
 
+## Encrypting the storage
+
+Your docs may hold things that shouldn't sit readable on GitHub, even in a private repository. In that
+case, encrypt the storage:
+
+```sh
+doku encrypt                 # asks whether you also want a passphrase, then shows the recovery key
+doku sync                    # pushes the encrypted storage
+```
+
+On the machine you work on, **nothing changes**: the files in the storage, and in every project's
+`.doku/`, stay plain files that you and your AI assistants read and edit as before. Only what leaves the
+machine is encrypted: every commit that `doku sync` pushes, and every `doku zip`. Nothing is stored twice.
+Git encrypts each file as it goes into the repository and decrypts it on checkout (clean/smudge filters,
+the same approach git-crypt uses).
+
+### The recovery key, and an optional passphrase
+
+`doku encrypt` creates a random 256-bit key and shows it once, as a **recovery key**:
+
+```
+DOKU1-43ZF7RTV-XB9VETND-21YP6AAG-2Y4PNY19-2X9A4X0C-9QE5MHCJ-R7MDV5ZN
+```
+
+Save it in at least two safe places, for example a password manager and a printed copy. doku asks you to
+type its last group to confirm you did. `--key-file <file>` also writes it to a file, which you then
+move off the machine. Other machines need this key to read the synced docs. doku never puts it in the
+repository or sends it anywhere. It lives only in each unlocked storage's `.git` folder.
+
+You can also set a **passphrase** (`doku encrypt --passphrase`, or later with `doku key --passphrase`).
+Then either the recovery key or the passphrase unlocks the storage. The passphrase-protected copy of the
+key is stored in the repository, so anyone with access to the repository can try to guess the
+passphrase offline. Use a long one (a few random words), or skip it and use only the recovery key.
+
+If you lose the recovery key (and the passphrase), your files are still readable and editable on every
+machine where the storage is unlocked, and `doku key` shows the key again there. If you also lose all
+those machines, nobody can read the encrypted copies, not even you.
+
+### On another machine
+
+```sh
+doku init --clone <your-private-repo-url>   # notices the storage is encrypted, asks for the key
+```
+
+If you press Enter instead of entering the key, the storage stays **locked**: the files are checked out
+still encrypted, `doku status` shows it, and `doku sync` and `doku zip` refuse to run until you unlock
+it with `doku unlock`. Nothing unencrypted can be pushed from a locked machine. `--key-file <file>` reads
+the key from a file instead of asking.
+
+### What happens to the history
+
+The commits made before `doku encrypt` hold your files unencrypted. So `doku encrypt` replaces the
+whole history with a single encrypted commit and deletes the old history from the storage's `.git`. Your
+current files are all kept. `--backup-history` saves the old history as a git bundle in
+`~/.doku/backups/` first (outside the storage, unencrypted).
+
+If the remote already has the old history, the next `doku sync` replaces it with a force push. Hosts
+like GitHub can keep deleted commits cached for a while, and forks or other clones keep their copies.
+The safest option is to push to a **new, empty repository** instead
+(`git -C "$(doku path)" remote set-url origin <new-url>` before `doku sync`), and delete the old one.
+
+Other machines that have the old history get a message on their next `doku sync` telling them to run
+`doku unlock`. That command asks for the key and switches the machine to the encrypted history. Files
+that only that machine had are kept, and the next sync adds them encrypted. Files that differed from
+the remote are copied to `~/.doku/backups/` first.
+
+### What is protected, and what isn't
+
+- **Protected:** the contents of every file on the remote and in encrypted zips. doku uses AES-256-GCM,
+  with keys derived by HKDF-SHA256. A passphrase is stretched with scrypt. Tampered data is rejected.
+- **Not hidden:** file and folder names, file sizes and commit times are visible on the remote. The same
+  content always encrypts the same way (git needs that to see unchanged files as unchanged), so the
+  remote can also tell that two files are identical. Zips hide the file names too.
+- **Not protected against:** anyone who can use a machine where the storage is unlocked. They can read
+  the files and the key there. Encryption protects the remote and the zips, not an unlocked machine.
+- **Post-quantum:** doku uses only symmetric crypto, with no public-key exchange that a quantum computer
+  could break. Grover's algorithm at best halves the strength of a 256-bit key, which leaves 128 bits,
+  still out of reach. So there is no separate `--post-quantum` mode: the default already is one.
+
+### Managing it
+
+| Command | What it does |
+|---|---|
+| `doku status` | Shows `encryption: on, unlocked`, `LOCKED` or `off`. |
+| `doku key` | Shows the recovery key again (only on an unlocked machine). |
+| `doku key --passphrase` / `--no-passphrase` | Sets, changes or removes the passphrase; `doku sync` shares the change. Older zips and commits keep accepting the old one. |
+| `doku unlock` | Enters the key on this machine (a locked clone, or an old clone of a storage encrypted elsewhere). |
+| `doku decrypt` | Turns encryption off. It doesn't ask for the key (an unlocked machine has it anyway), only for you to type `decrypt`. The next `doku sync` pushes every file unencrypted, and other machines switch off on their next sync. Earlier commits stay encrypted; the key is kept in `~/.doku/backups/` so they can still be read. |
+| `doku zip --plain` | Writes an unencrypted zip from an encrypted storage. |
+
+`doku load` opens encrypted zips with the storage's own key when it matches. Otherwise it asks for the
+zip's recovery key or passphrase, so a zip also opens on a machine without that storage.
+
+Diffs stay readable on unlocked machines: `git diff` and `git log -p` in the storage show plain text.
+When two machines edit the same file, `doku sync` merges the decrypted text, and conflict markers show up
+in plain text like in any other conflict. If you move the `doku-cli` folder, run `doku doctor --fix` so
+git finds doku again. Until you do, git refuses to commit in the storage rather than committing
+unencrypted.
+
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `doku init [--storage <path>] [--clone <url>]` | Set the storage for this machine: create it (with `git init`), or clone an existing one. Running it again keeps the current storage. |
+| `doku init [--storage <path>] [--clone <url>] [--key-file <file>]` | Set the storage for this machine: create it (with `git init`), or clone an existing one (asking for the key when it is encrypted). Running it again keeps the current storage. |
 | `doku link [projectPath] [name] [--as <folder>] [--no-agents-note]` | Create `storage/<name>/` if needed and link it into the project as `.doku/` (or `--as`). Without a path, links the current folder; inside the storage the path is required. |
 | `doku unlink <projectPath\|name> [--as <folder>] [--all]` | Remove the link and everything `link` added to the project. The docs stay in storage. |
 | `doku list` | Projects in storage and where each one is linked on this machine. |
 | `doku status` | Health of every link, plus uncommitted changes in the storage. |
 | `doku sync [-m <msg>]` | `git add -A`, commit, `pull --rebase`, `push` in the storage. |
+| `doku encrypt [--passphrase\|--no-passphrase] [--key-file <file>] [--backup-history] [-y]` | Encrypt the storage in git and in zips; files stay plain on this machine. Replaces the history with one encrypted commit. See [Encrypting the storage](#encrypting-the-storage). |
+| `doku unlock [--key-file <file>]` | Enter the recovery key or passphrase of an encrypted storage on this machine. |
+| `doku key [--passphrase\|--no-passphrase]` | Show the recovery key, or set, change or remove the passphrase. |
+| `doku decrypt` | Turn encryption off; the next sync pushes every file unencrypted. |
 | `doku ignore [paths...]` | Keep files or folders on this machine only (not synced, not zipped). Without paths, lists the rules. |
 | `doku unignore <paths...>` | Undo `doku ignore`. |
-| `doku zip [target] [--all] [-o <file>] [-s]` | Zip the project you are in (or `target`), then open the folder containing the zip. Outside a project it asks before zipping the whole storage; `--all` zips it without asking. `-s`/`--silent` only prints the zip path. |
-| `doku load <zip> [--project <name>\|--all] [--merge\|--overwrite] [--link <path>\|--no-link] [-y]` | Load a zip into the storage. Asks before creating a project or changing existing files, and never deletes anything. |
+| `doku zip [target] [--all] [-o <file>] [-s] [--plain]` | Zip the project you are in (or `target`), then open the folder containing the zip. Outside a project it asks before zipping the whole storage; `--all` zips it without asking. `-s`/`--silent` only prints the zip path. An encrypted storage writes encrypted zips unless you pass `--plain`. |
+| `doku load <zip> [--project <name>\|--all] [--merge\|--overwrite] [--link <path>\|--no-link] [-y] [--key-file <file>]` | Load a zip into the storage. Asks before creating a project or changing existing files, and never deletes anything. Encrypted zips ask for their key unless it's this storage's. |
 | `doku doctor [--fix] [--prune]` | Check links. `--fix` recreates missing or stale ones (e.g. after moving the storage); `--prune` forgets projects that no longer exist. |
 | `doku open [name]` | Open the storage, or one project's docs, in VS Code. |
 | `doku path [name]` | Print the storage path, or one project's docs path. |
