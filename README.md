@@ -280,6 +280,12 @@ unencrypted.
 | `doku unignore <paths...>` | Undo `doku ignore`. |
 | `doku zip [target] [--all] [-o <file>] [-s] [--plain]` | Zip the project you are in (or `target`), then open the folder containing the zip. Outside a project it asks before zipping the whole storage; `--all` zips it without asking. `-s`/`--silent` only prints the zip path. An encrypted storage writes encrypted zips unless you pass `--plain`. |
 | `doku load <zip> [--project <name>\|--all] [--merge\|--overwrite] [--link <path>\|--no-link] [-y] [--key-file <file>]` | Load a zip into the storage. Asks before creating a project or changing existing files, and never deletes anything. Encrypted zips ask for their key unless it's this storage's. |
+| `doku kit [list]` | Kits in the storage, and where each one is used on this machine. See [Kits](#kits-shared-files-for-project-folders). |
+| `doku kit new <name> [paths...]` | Create a kit in the storage, optionally starting it with copies of files from this project. |
+| `doku kit add <name> [--overwrite\|--keep-mine] [--dir <folder>]` | Copy a kit into the project folder. Files already there are asked about. |
+| `doku kit update [name] [-y] [--overwrite\|--keep-mine] [--dir <folder>]` | Bring kit changes into the project. Asks about files you changed. |
+| `doku kit remove <name> [--delete-files\|--keep-files]` | Stop using a kit in the project; offers to delete its files you never changed. |
+| `doku kit open [name]` / `doku kit path [name]` | Open a kit in VS Code, or print its path. Kits are only ever edited there. |
 | `doku doctor [--fix] [--prune]` | Check links. `--fix` recreates missing or stale ones (e.g. after moving the storage); `--prune` forgets projects that no longer exist. |
 | `doku open [name]` | Open the storage, or one project's docs, in VS Code. |
 | `doku path [name]` | Print the storage path, or one project's docs path. |
@@ -384,6 +390,68 @@ file name, and you can type another.
   between append and overwrite for you.
 - Entries with absolute paths, `..`, invalid names or `.git` are skipped, and doku never writes through
   a link inside the storage.
+
+## Kits: shared files for project folders
+
+Some files belong in the project folder itself rather than in `.doku/`, and you reuse them across projects: a
+`CLAUDE.md` for a folder that holds several projects, `.mcp.json`, `.vscode/settings.json`,
+`.claude/commands/`. A **kit** is a named folder of such files in the storage, laid out the way they should
+appear in a project folder. Unlike `.doku/`, a kit is **copied** into the project, not linked. Each project
+can then change its copies, and doku still brings in later changes to the kit.
+
+```
+my-project/            ← doku kit add multi-root puts CLAUDE.md and .mcp.json here
+  .doku/
+  unity-project/
+  node-server/
+  CLAUDE.md
+  .mcp.json
+```
+
+```sh
+cd C:/projects/my-project
+doku kit new multi-root CLAUDE.md .mcp.json   # start a kit from files you already have here
+doku kit new unity-generic                    # or an empty one, filled in the storage (doku kit open unity-generic)
+
+cd D:/work/other-project
+doku kit add multi-root                       # copy it in
+doku kit update                               # later: bring in changes to every kit this project uses
+```
+
+- Kits live in `storage/.kits/<name>/`. `doku sync` shares them between machines like everything else
+  (encrypted too, if the storage is), and `doku list` doesn't show them as projects.
+- **Changes only ever flow from the kit to projects.** To change a kit, edit it in the storage
+  (`doku kit open <name>`). Nothing you change in a project goes back into the kit, and `doku sync` never
+  changes the files in projects. When a sync brings kit changes, it tells you to run `doku kit update`.
+- A project folder doesn't need its own docs to use kits. Inside a linked project, kits go to the folder
+  that holds `.doku/`, even when you run the command in a subfolder. Elsewhere they go to the current
+  folder, or to `--dir <folder>`.
+- Several kits can be used in one project, as long as no two of them have the same file.
+
+### What `doku kit update` does with each file
+
+doku remembers which version of each file it last copied, so it can tell your changes apart from the kit's:
+
+| Changed in the project | Changed in the kit | What happens |
+|---|---|---|
+| no | yes (or new, or removed) | Listed together, with one question: **update** / **ignore** / **later** |
+| yes | no | Nothing: the file is yours now |
+| yes (or deleted) | yes | Asked per file: **overwrite** (yours is backed up to `~/.doku/backups/`) / **keep mine** / write the kit's version **beside** it as `<file>.kit-new` / **later** |
+
+**Ignore** and **keep mine** are remembered: you're asked again only when the kit changes that file again.
+**Later** changes nothing and asks again next time. Without any input (e.g. in a script), nothing changes.
+Answer up front with `-y` (apply the changes to files you didn't change), `--keep-mine` (that, plus keep
+every file changed in both places) or `--overwrite` (that, plus replace them).
+
+A file you deleted from the project stays deleted until the kit changes it. A file the kit no longer has is
+deleted only if you never changed it. `doku kit add` asks the same way about files that are already in the
+project folder.
+
+Which projects use which kits, and the versions last copied, are recorded per machine in
+`~/.doku/kits.json`, like the links. Files at the root of a folder with several projects usually aren't in any
+git repository, so each machine has its own copies. On another machine, run `doku kit add <name>` there once.
+Files that already match the kit are simply recorded as up to date. `doku status` shows which projects have
+kit changes waiting, and `doku kit remove <name>` stops using a kit in a project.
 
 ## Things to know
 

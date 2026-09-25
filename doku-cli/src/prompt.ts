@@ -107,12 +107,12 @@ export interface Choice<T extends string> {
   label: string;
 }
 
-/** Pick one of `choices` by key. Enter, or no input, picks `def`. */
-export async function choose<T extends string>(p: Prompter, question: string, choices: Choice<T>[], def: T): Promise<T> {
+/** Pick one of `choices` by key. Enter picks `def`; no input at all picks `noInput` (default: `def`). */
+export async function choose<T extends string>(p: Prompter, question: string, choices: Choice<T>[], def: T, noInput: T = def): Promise<T> {
   const keys = choices.map((c) => (c.value === def ? c.key.toUpperCase() : c.key)).join('/');
   for (;;) {
     const answer = await p.ask(`${question}\n${choices.map((c) => `  [${c.key}] ${c.label}`).join('\n')}\nChoose [${keys}]: `);
-    if (answer === null) return def;
+    if (answer === null) return noInput;
     const v = answer.trim().toLowerCase();
     if (!v) return def;
     const hit = choices.find((c) => c.key === v || c.value === v);

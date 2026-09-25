@@ -4,6 +4,16 @@ import { doctorCommand } from './commands/doctor.js';
 import { decryptCommand, encryptCommand, keyCommand, unlockCommand } from './commands/encrypt.js';
 import { ignoreCommand, unignoreCommand } from './commands/ignore.js';
 import { initCommand } from './commands/init.js';
+import {
+  kitAddCommand,
+  kitHints,
+  kitListCommand,
+  kitNewCommand,
+  kitOpenCommand,
+  kitPathFor,
+  kitRemoveCommand,
+  kitUpdateCommand,
+} from './commands/kit.js';
 import { DEFAULT_LINK_NAME, linkFromCli } from './commands/link.js';
 import { listCommand } from './commands/list.js';
 import { loadCommand } from './commands/load.js';
@@ -96,7 +106,14 @@ program
   .command('sync')
   .description('commit storage changes, pull --rebase and push')
   .option('-m, --message <msg>', 'commit message')
-  .action(run((opts: { message?: string }) => void syncStorage(requireConfig().storagePath, opts.message)));
+  .action(
+    run((opts: { message?: string }) => {
+      const { storagePath } = requireConfig();
+      syncStorage(storagePath, opts.message);
+      // Kits are never updated by a sync; only point out what is waiting.
+      for (const hint of kitHints(storagePath)) log.warn(hint);
+    }),
+  );
 
 const remote = program.command('remote').description(`show or change the storage's git remote (origin), used by \`doku sync\``);
 remote.command('show', { isDefault: true }).description('print the remote URL').action(run(showRemoteCommand));
@@ -171,6 +188,54 @@ program
   .option('-y, --yes', 'create missing projects without asking')
   .option('--key-file <file>', 'encrypted zip: file with its recovery key (instead of asking)')
   .action(run(async (zipFile: string, opts) => void (await loadCommand(zipFile, opts))));
+
+const kit = program
+  .command('kit')
+  .description('shared files (CLAUDE.md, .mcp.json, …) copied from the storage into project folders, and updated from it');
+kit.command('list', { isDefault: true }).alias('ls').description('kits in the storage and where they are used').action(run(() => kitListCommand()));
+kit
+  .command('new')
+  .description('create a kit in the storage, optionally starting it with copies of files from this project')
+  .argument('<name>', 'kit name, e.g. unity-generic')
+  .argument('[paths...]', "files or folders of this project to start the kit with (they keep their place relative to the project folder)")
+  .option('--dir <folder>', 'project folder (default: the linked project you are in, or the current folder)')
+  .action(run((name: string, paths: string[], opts) => void kitNewCommand(name, paths, opts)));
+kit
+  .command('add')
+  .description('copy a kit into the project folder; files already there are asked about')
+  .argument('<name>', 'kit name')
+  .option('--dir <folder>', 'project folder (default: the linked project you are in, or the current folder)')
+  .option('--overwrite', "files that differ: replace them with the kit's version (backed up first)")
+  .option('--keep-mine', 'files that differ: keep them as they are')
+  .action(run(async (name: string, opts) => void (await kitAddCommand(name, opts))));
+kit
+  .command('update')
+  .description("bring changes of the project's kits into it (one-way; asks about files you changed)")
+  .argument('[name]', 'only this kit (default: every kit the project uses)')
+  .option('--dir <folder>', 'project folder (default: the linked project you are in, or the current folder)')
+  .option('-y, --yes', "apply changes to files you didn't change without asking")
+  .option('--overwrite', "also replace files changed here and in the kit (yours are backed up first)")
+  .option('--keep-mine', 'also keep every file changed here and in the kit as it is')
+  .action(run(async (name: string | undefined, opts) => void (await kitUpdateCommand(name, opts))));
+kit
+  .command('remove')
+  .alias('rm')
+  .description("stop using a kit in the project; offers to delete its files you never changed")
+  .argument('<name>', 'kit name')
+  .option('--dir <folder>', 'project folder (default: the linked project you are in, or the current folder)')
+  .option('--delete-files', 'delete the unchanged files without asking')
+  .option('--keep-files', 'leave every file in place')
+  .action(run(async (name: string, opts) => void (await kitRemoveCommand(name, opts))));
+kit
+  .command('open')
+  .description('open the kits (or one kit) in VS Code; the only place kits are edited')
+  .argument('[name]', 'kit name')
+  .action(run((name?: string) => kitOpenCommand(name)));
+kit
+  .command('path')
+  .description('print the path of the kits folder, or of one kit')
+  .argument('[name]', 'kit name')
+  .action(run((name?: string) => console.log(kitPathFor(name))));
 
 program
   .command('doctor')

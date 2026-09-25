@@ -6,6 +6,7 @@ import { isRepoRoot, tryGit } from '../git.js';
 import { describeHealth, linkHealth } from '../health.js';
 import { log, pc } from '../log.js';
 import { linkPathOf, loadLinks } from '../registry.js';
+import { kitStatusLines } from './kit.js';
 import { originUrl } from './remote.js';
 
 export function statusCommand(): void {
@@ -21,6 +22,13 @@ export function statusCommand(): void {
     log.info(`  ${entry.name.padEnd(24)} ${linkPathOf(entry)}  ${describeHealth(health)}`);
   }
   if (problems) log.warn(`${problems} link(s) need attention. Run \`doku doctor --fix\`.`);
+
+  const kits = kitStatusLines(storagePath);
+  if (kits.length) {
+    log.info('');
+    log.info(pc.bold('Kits on this machine'));
+    for (const line of kits) log.info(`  ${line}`);
+  }
 
   log.info('');
   log.info(pc.bold('Storage') + pc.dim(`  ${storagePath}`));

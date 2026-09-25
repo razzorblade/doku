@@ -4,6 +4,7 @@ import { requireConfig } from '../config.js';
 import { cryptState, filtersInstalled, installFilters } from '../encryption.js';
 import { isRepoRoot } from '../git.js';
 import { describeHealth, linkHealth } from '../health.js';
+import { deleteKitEntry, loadKitEntries } from '../kits.js';
 import { removeLink } from '../link.js';
 import { log } from '../log.js';
 import { deleteLink, linkPathOf, loadLinks } from '../registry.js';
@@ -55,6 +56,18 @@ export function doctorCommand(opts: DoctorOptions): number {
     if (health === 'mismatch' || health === 'broken') removeLink(linkPathOf(entry));
     applyLink(entry, storagePath);
     log.ok(health === 'ok' ? `${label}: ok` : `${label}: repaired`);
+  }
+
+  for (const entry of loadKitEntries()) {
+    if (fs.existsSync(entry.projectPath)) continue;
+    const label = `kit "${entry.kit}" at ${entry.projectPath}`;
+    if (opts.prune) {
+      deleteKitEntry(entry);
+      log.ok(`Forgot ${label} (project folder is gone)`);
+    } else {
+      log.warn(`${label}: project folder is missing. Use --prune to forget it.`);
+      remaining++;
+    }
   }
 
   // Encryption: git must run this doku as the filter (its path changes when doku-cli moves).

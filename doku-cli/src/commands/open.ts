@@ -28,7 +28,10 @@ export function revealInFolder(file: string): void {
 }
 
 export function openCommand(name?: string): void {
-  const dir = storagePathFor(name);
+  openInCode(storagePathFor(name));
+}
+
+export function openInCode(dir: string): void {
   // `code` is a .cmd shim on Windows, which needs a shell to run.
   const child = spawn('code', [`"${dir}"`], { stdio: 'inherit', shell: true });
   child.on('exit', (code) => {

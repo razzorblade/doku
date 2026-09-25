@@ -54,12 +54,12 @@ interface Plan {
   blocked: string[];
 }
 
-function destOf(dir: string, rel: string): string {
+export function destOf(dir: string, rel: string): string {
   return path.join(dir, ...rel.split('/'));
 }
 
 /** False when a parent of `rel` inside `dir` is a file or a link (writing there could escape `dir`). */
-function parentsWritable(dir: string, rel: string): boolean {
+export function parentsWritable(dir: string, rel: string): boolean {
   let p = dir;
   for (const seg of rel.split('/').slice(0, -1)) {
     p = path.join(p, seg);
@@ -106,7 +106,7 @@ function writeFiles(dir: string, rels: string[], files: Map<string, Uint8Array>,
 }
 
 /** Copy the files about to be replaced to ~/.doku/backups/, outside the storage. */
-function backupFiles(dir: string, rels: string[], name: string): string {
+export function backupFiles(dir: string, rels: string[], name: string): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backup = path.join(dokuHome(), 'backups', `${name}-${stamp}`);
   for (const rel of rels) {

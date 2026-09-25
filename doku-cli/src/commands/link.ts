@@ -4,6 +4,7 @@ import { addAgentsNote, NOTE_FILE } from '../agentsNote.js';
 import { requireConfig } from '../config.js';
 import { DokuError } from '../errors.js';
 import { addExclude, excludeEntryFor, isTracked } from '../gitExclude.js';
+import { KITS_DIR } from '../kits.js';
 import { createLink, inspectLink, removeLink } from '../link.js';
 import { log, pc } from '../log.js';
 import { assertSegment, isInside, normalizeTarget, samePath } from '../paths.js';
@@ -101,6 +102,7 @@ export function linkCommand(project: string | undefined, name: string | undefine
   };
   assertSegment(entry.name, 'project name');
   assertSegment(entry.linkName, 'link name');
+  if (entry.name.toLowerCase() === KITS_DIR) throw new DokuError(`"${KITS_DIR}" is where the storage keeps kits; pick another name.`);
 
   const target = path.join(storagePath, entry.name);
   const linkPath = linkPathOf(entry);
