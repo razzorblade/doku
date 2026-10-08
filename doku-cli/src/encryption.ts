@@ -155,8 +155,22 @@ function shellQuote(p: string): string {
   return `"${p.replace(/\\/g, '/').replace(/(["$`])/g, '\\$1')}"`;
 }
 
+/**
+ * Node for git to run. fnm runs each shell's Node from a temporary `fnm_multishells/<id>` link that
+ * it deletes later, so that link is resolved to the installation it points at: the filter is
+ * `required`, and a vanished Node would break every commit and checkout in the storage.
+ */
+export function stableNodePath(execPath = process.execPath): string {
+  if (!/[\\/]fnm_multishells[\\/]/i.test(execPath)) return execPath;
+  try {
+    return fs.realpathSync.native(execPath);
+  } catch {
+    return execPath;
+  }
+}
+
 function dokuCommand(...args: string[]): string {
-  return [shellQuote(process.execPath), shellQuote(cliEntry()), ...args].join(' ');
+  return [shellQuote(stableNodePath()), shellQuote(cliEntry()), ...args].join(' ');
 }
 
 function filterConfig(): [string, string][] {

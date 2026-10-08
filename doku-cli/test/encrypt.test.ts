@@ -16,6 +16,7 @@ import {
   plaintextObjects,
   readLocalState,
   removeFilters,
+  stableNodePath,
 } from '../src/encryption.js';
 import { tryGit } from '../src/git.js';
 import type { Prompter } from '../src/prompt.js';
@@ -330,6 +331,27 @@ describe('encryption', () => {
     expect(read(box.root, 'home-b', 'backups', backups[0], 'proj', 'notes.md')).toBe('edited on B, unsynced');
     expect(syncStorage(storageB)).toMatchObject({ committed: true, pushed: true });
     expect(plaintextBlobs(remote, ['--all'])).toEqual([]);
+  });
+});
+
+describe('stableNodePath', () => {
+  const box = useSandbox();
+
+  it('resolves a temporary fnm shell link to the installation it points at', () => {
+    const install = path.join(box.root, 'fnm', 'node-versions', 'v24', 'installation');
+    fs.mkdirSync(install, { recursive: true });
+    fs.writeFileSync(path.join(install, 'node.exe'), '');
+    const shell = path.join(box.root, 'fnm_multishells', '123_456');
+    fs.mkdirSync(path.dirname(shell), { recursive: true });
+    fs.symlinkSync(install, shell, 'junction');
+    expect(stableNodePath(path.join(shell, 'node.exe'))).toBe(path.join(install, 'node.exe'));
+  });
+
+  it('leaves other Node paths as they are', () => {
+    const plain = path.join(box.root, 'nodejs', 'node.exe');
+    expect(stableNodePath(plain)).toBe(plain);
+    const gone = path.join(box.root, 'fnm_multishells', 'gone', 'node.exe');
+    expect(stableNodePath(gone)).toBe(gone);
   });
 });
 
